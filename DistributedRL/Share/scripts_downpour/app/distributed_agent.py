@@ -1,6 +1,9 @@
-from airsim_client import *
+#from airsim_client import *
 from rl_model import RlModel
+import airsim
+import msgpackrpc
 import time
+import math
 import numpy as np
 import threading
 import json
@@ -14,11 +17,12 @@ import requests
 import PIL
 import copy
 import datetime
+from coverage_map import CoverageMap
 
 # A class that represents the agent that will drive the vehicle, train the model, and send the gradient updates to the trainer.
 class DistributedAgent():
     def __init__(self, parameters):
-        required_parameters = ['data_dir', 'max_epoch_runtime_sec', 'replay_memory_size', 'batch_size', 'min_epsilon', 'per_iter_epsilon_reduction', 'experiment_name', 'train_conv_layers']
+        required_parameters = ['data_dir', 'max_epoch_runtime_sec', 'replay_memory_size', 'batch_size', 'min_epsilon', 'per_iter_epsilon_reduction', 'experiment_name', 'train_conv_layers', 'start_x', 'start_y', 'start_z', 'log_path']
         for required_parameter in required_parameters:
             if required_parameter not in parameters:
                 raise ValueError('Missing required parameter {0}'.format(required_parameter))
@@ -72,8 +76,11 @@ class DistributedAgent():
 
         self.__experiences = {}
 
-        self.__init_road_points()
-        self.__init_reward_points()
+        self.__start_point = [float(parameters['start_x']), float(parameters['start_y']), float(parameters['start_z'])]
+        self.__log_file = parameters['log_path']
+
+        # initiate coverage map
+        self.__coverage_map = CoverageMap(start_point=self.__start_point, map_size=10000, state_size=2000, input_size=84, height_threshold=0.9)
 
     # Starts the agent
     def start(self):
@@ -127,7 +134,6 @@ class DistributedAgent():
             print('Run is local. Skipping connection to trainer.')
             self.__model = RlModel(self.__weights_path, self.__train_conv_layers)
             
-            
         # Connect to the AirSim exe
         self.__connect_to_airsim()
 
@@ -143,7 +149,7 @@ class DistributedAgent():
                 if (percent_full >= 100.0):
                     break
             except msgpackrpc.error.TimeoutError:
-                print('Lost connection to AirSim while fillling replay memory. Attempting to reconnect.')
+                print('Lost connection to AirSim while filling replay memory. Attempting to reconnect.')
                 self.__connect_to_airsim()
             
         # Get the latest model. Other agents may have finished before us.
@@ -188,10 +194,11 @@ class DistributedAgent():
         while True:
             try:
                 print('Attempting to connect to AirSim (attempt {0})'.format(attempt_count))
-                self.__car_client = CarClient()
+                self.__car_client = airsim.CarClient()
                 self.__car_client.confirmConnection()
                 self.__car_client.enableApiControl(True)
-                self.__car_controls = CarControls()
+                self.__car_controls = airsim.CarControls()
+                self.__coverage_map.set_client(client=self.__car_client) # update client on coverage map
                 print('Connected!')
                 return
             except:
@@ -220,6 +227,9 @@ class DistributedAgent():
     def __run_airsim_epoch(self, always_random):
         print('Running AirSim epoch.')
         
+        # reset coverage map
+        self.__coverage_map.reset()
+
         # Pick a random starting point on the roads
         starting_points, starting_direction = self.__get_next_starting_point()
         
@@ -230,10 +240,10 @@ class DistributedAgent():
         wait_delta_sec = 0.01
 
         print('Getting Pose')
-        self.__car_client.simSetPose(Pose(Vector3r(starting_points[0], starting_points[1], starting_points[2]), AirSimClientBase.toQuaternion(starting_direction[0], starting_direction[1], starting_direction[2])), True)
+        self.__car_client.simSetVehiclePose(airsim.Pose(airsim.Vector3r(starting_points[0], starting_points[1], starting_points[2]), toQuaternion(starting_direction[0], starting_direction[1], starting_direction[2])), True)
 
-        # Currently, simSetPose does not allow us to set the velocity. 
-        # So, if we crash and call simSetPose, the car will be still moving at its previous velocity.
+        # Currently, simSetVehiclePose does not allow us to set the velocity. 
+        # So, if we crash and call simSetVehiclePose, the car will be still moving at its previous velocity.
         # We need the car to stop moving, so push the brake and wait for a few seconds.
         print('Waiting for momentum to die')
         self.__car_controls.steering = 0
@@ -243,12 +253,12 @@ class DistributedAgent():
         time.sleep(4)
         
         print('Resetting')
-        self.__car_client.simSetPose(Pose(Vector3r(starting_points[0], starting_points[1], starting_points[2]), AirSimClientBase.toQuaternion(starting_direction[0], starting_direction[1], starting_direction[2])), True)
+        self.__car_client.simSetVehiclePose(airsim.Pose(airsim.Vector3r(starting_points[0], starting_points[1], starting_points[2]), toQuaternion(starting_direction[0], starting_direction[1], starting_direction[2])), True)
 
         #Start the car rolling so it doesn't get stuck
         print('Running car for a few seconds...')
         self.__car_controls.steering = 0
-        self.__car_controls.throttle = 1
+        self.__car_controls.throttle = 0.5
         self.__car_controls.brake = 0
         self.__car_client.setCarControls(self.__car_controls)
         
@@ -256,7 +266,7 @@ class DistributedAgent():
         stop_run_time =datetime.datetime.now() + datetime.timedelta(seconds=2)
         while(datetime.datetime.now() < stop_run_time):
             time.sleep(wait_delta_sec)
-            state_buffer = self.__append_to_ring_buffer(self.__get_image(), state_buffer, state_buffer_len)
+            state_buffer = self.__append_to_ring_buffer(self.__get_cov_image(), state_buffer, state_buffer_len)
         done = False
         actions = [] #records the state we go to
         pre_states = []
@@ -265,15 +275,18 @@ class DistributedAgent():
         predicted_rewards = []
         car_state = self.__car_client.getCarState()
 
+        # slow down a bit
+        self.__car_controls.throttle = 0.4
+        self.__car_client.setCarControls(self.__car_controls)
+
         start_time = datetime.datetime.utcnow()
         end_time = start_time + datetime.timedelta(seconds=self.__max_epoch_runtime_sec)
         
         num_random = 0
-        far_off = False
         
         # Main data collection loop
         while not done:
-            collision_info = self.__car_client.getCollisionInfo()
+            collision_info = self.__car_client.simGetCollisionInfo()
             utc_now = datetime.datetime.utcnow()
             
             # Check for terminal conditions:
@@ -281,8 +294,7 @@ class DistributedAgent():
             # 2) Car is stopped
             # 3) The run has been running for longer than max_epoch_runtime_sec. 
             #       This constraint is so the model doesn't end up having to churn through huge chunks of data, slowing down training
-            # 4) The car has run off the road
-            if (collision_info.has_collided or car_state.speed < 2 or utc_now > end_time or far_off):
+            if (collision_info.has_collided or car_state.speed < 0.5 or utc_now > end_time):
                 print('Start time: {0}, end time: {1}'.format(start_time, utc_now), file=sys.stderr)
                 if (utc_now > end_time):
                     print('timed out.')
@@ -316,10 +328,10 @@ class DistributedAgent():
                 time.sleep(wait_delta_sec)
 
                 # Observe outcome and compute reward from action
-                state_buffer = self.__append_to_ring_buffer(self.__get_image(), state_buffer, state_buffer_len)
+                state_buffer = self.__append_to_ring_buffer(self.__get_cov_image(), state_buffer, state_buffer_len)
                 car_state = self.__car_client.getCarState()
-                collision_info = self.__car_client.getCollisionInfo()
-                reward, far_off = self.__compute_reward(collision_info, car_state)
+                collision_info = self.__car_client.simGetCollisionInfo()
+                reward = self.__compute_reward(collision_info, car_state, pre_state, state_buffer)
                 
                 # Add the experience to the set of examples from this iteration
                 pre_states.append(pre_state)
@@ -452,121 +464,81 @@ class DistributedAgent():
         response = requests.get('http://{0}:80/latest'.format(self.__trainer_ip_address)).json()
         self.__model.from_packet(response)
 
+    # Gets a coverage image from AirSim
+    def __get_cov_image(self):
+
+        state = self.__coverage_map.get_state()
+        state = state / 255.0
+
+        # debug only
+        # im = PIL.Image.fromarray(np.uint8(state))
+        # im.save("DistributedRL\\debug\\{}.png".format(time.time()))
+
+        return state
+
     # Gets an image from AirSim
     def __get_image(self):
-        image_response = self.__car_client.simGetImages([ImageRequest(0, AirSimImageType.Scene, False, False)])[0]
+        image_response = self.__car_client.simGetImages([airsim.ImageRequest(0, airsim.ImageType.Scene, False, False)])[0]
         image1d = np.fromstring(image_response.image_data_uint8, dtype=np.uint8)
         image_rgba = image1d.reshape(image_response.height, image_response.width, 4)
 
         return image_rgba[76:135,0:255,0:3].astype(float)
 
-    # Computes the reward functinon based on the car position.
-    def __compute_reward(self, collision_info, car_state):
-        #Define some constant parameters for the reward function
-        THRESH_DIST = 3.5                # The maximum distance from the center of the road to compute the reward function
-        DISTANCE_DECAY_RATE = 1.2        # The rate at which the reward decays for the distance function
-        CENTER_SPEED_MULTIPLIER = 2.0    # The ratio at which we prefer the distance reward to the speed reward
+    # Computes the reward functinon based on collision.
+    def __compute_reward(self, collision_info, car_state, pre_state, post_state):
 
         # If the car has collided, the reward is always zero
         if (collision_info.has_collided):
-            return 0.0, True
-        
-        # If the car is stopped, the reward is always zero
-        speed = car_state.speed
-        if (speed < 2):
-            return 0.0, True
-        
-        #Get the car position
-        position_key = bytes('position', encoding='utf8')
-        x_val_key = bytes('x_val', encoding='utf8')
-        y_val_key = bytes('y_val', encoding='utf8')
+            return 0.0
 
-        car_point = np.array([car_state.kinematics_true[position_key][x_val_key], car_state.kinematics_true[position_key][y_val_key], 0])
+        # Get the current state of the vehicle
+        car_state = self.__car_client.getCarState()
+        pos = car_state.kinematics_estimated.position
+
+        return 1.0
+
+    # get most newly generated random point
+    def __get_next_generated_random_point(self):
         
-        # Distance component is exponential distance to nearest line
-        distance = 999
-        
-        #Compute the distance to the nearest center line
-        for line in self.__reward_points:
-            local_distance = 0
-            length_squared = ((line[0][0]-line[1][0])**2) + ((line[0][1]-line[1][1])**2)
-            if (length_squared != 0):
-                t = max(0, min(1, np.dot(car_point-line[0], line[1]-line[0]) / length_squared))
-                proj = line[0] + (t * (line[1]-line[0]))
-                local_distance = np.linalg.norm(proj - car_point)
+        # grab the newest line with generated random point
+        newest_rp = "None"
+
+        # keep searching until the simulation is giving something
+        while newest_rp == "None":
             
-            distance = min(local_distance, distance)
+            # notify user
+            print("Searching for a random point...")
+
+            # open log file
+            log_file = open(self.__log_file, "r")
+
+            # search for the newest generated random point line
+            for line in log_file:
+                if "RandomPoint" in line:
+                    newest_rp = line
             
-        distance_reward = math.exp(-(distance * DISTANCE_DECAY_RATE))
+        # notify user
+        print("Found random point.")
         
-        return distance_reward, distance > THRESH_DIST
+        # filter random point from line
+        random_point = [float(newest_rp.split(" ")[-3].split("=")[1]), float(newest_rp.split(" ")[-2].split("=")[1]), float(newest_rp.split(" ")[-1].split("=")[1])]
 
-    # Initializes the points used for determining the starting point of the vehicle
-    def __init_road_points(self):
-        self.__road_points = []
-        car_start_coords = [12961.722656, 6660.329102, 0]
-        with open(os.path.join(os.path.join(self.__data_dir, 'data'), 'road_lines.txt'), 'r') as f:
-            for line in f:
-                points = line.split('\t')
-                first_point = np.array([float(p) for p in points[0].split(',')] + [0])
-                second_point = np.array([float(p) for p in points[1].split(',')] + [0])
-                self.__road_points.append(tuple((first_point, second_point)))
-
-        # Points in road_points.txt are in unreal coordinates
-        # But car start coordinates are not the same as unreal coordinates
-        for point_pair in self.__road_points:
-            for point in point_pair:
-                point[0] -= car_start_coords[0]
-                point[1] -= car_start_coords[1]
-                point[0] /= 100
-                point[1] /= 100
-              
-    # Initializes the points used for determining the optimal position of the vehicle during the reward function
-    def __init_reward_points(self):
-        self.__reward_points = []
-        with open(os.path.join(os.path.join(self.__data_dir, 'data'), 'reward_points.txt'), 'r') as f:
-            for line in f:
-                point_values = line.split('\t')
-                first_point = np.array([float(point_values[0]), float(point_values[1]), 0])
-                second_point = np.array([float(point_values[2]), float(point_values[3]), 0])
-                self.__reward_points.append(tuple((first_point, second_point)))
+        return random_point
 
     # Randomly selects a starting point on the road
     # Used for initializing an iteration of data generation from AirSim
     def __get_next_starting_point(self):
     
+        # get random start point from log file, and make it relative to agent's starting point
+        random_start_point = self.__get_next_generated_random_point()
+        random_start_point = [random_start_point[0]-self.__start_point[0], random_start_point[1]-self.__start_point[1], random_start_point[2]-self.__start_point[2]]
+        random_start_point = [x / 100.0 for x in random_start_point]
+
+        # draw random orientation
+        random_direction = (0, 0, np.random.uniform(-math.pi,math.pi))
+
         # Get the current state of the vehicle
         car_state = self.__car_client.getCarState()
-
-        # Pick a random road.
-        random_line_index = np.random.randint(0, high=len(self.__road_points))
-        
-        # Pick a random position on the road. 
-        # Do not start too close to either end, as the car may crash during the initial run.
-        random_interp = (np.random.random_sample() * 0.4) + 0.3
-        
-        # Pick a random direction to face
-        random_direction_interp = np.random.random_sample()
-
-        # Compute the starting point of the car
-        random_line = self.__road_points[random_line_index]
-        random_start_point = list(random_line[0])
-        random_start_point[0] += (random_line[1][0] - random_line[0][0])*random_interp
-        random_start_point[1] += (random_line[1][1] - random_line[0][1])*random_interp
-
-        # Compute the direction that the vehicle will face
-        # Vertical line
-        if (np.isclose(random_line[0][1], random_line[1][1])):
-            if (random_direction_interp > 0.5):
-                random_direction = (0,0,0)
-            else:
-                random_direction = (0, 0, math.pi)
-        # Horizontal line
-        elif (np.isclose(random_line[0][0], random_line[1][0])):
-            if (random_direction_interp > 0.5):
-                random_direction = (0,0,math.pi/2)
-            else:
-                random_direction = (0,0,-1.0 * math.pi/2)
 
         # The z coordinate is always zero
         random_start_point[2] = -0
@@ -581,11 +553,27 @@ class DistributedAgent():
                 if e.errno != errno.EEXIST:
                     raise
 
+# convert euler angle to quaternion
+def toQuaternion(pitch, roll, yaw):
+    t0 = math.cos(yaw * 0.5)
+    t1 = math.sin(yaw * 0.5)
+    t2 = math.cos(roll * 0.5)
+    t3 = math.sin(roll * 0.5)
+    t4 = math.cos(pitch * 0.5)
+    t5 = math.sin(pitch * 0.5)
+
+    q = airsim.Quaternionr()
+    q.w_val = t0 * t2 * t4 + t1 * t3 * t5 #w
+    q.x_val = t0 * t3 * t4 - t1 * t2 * t5 #x
+    q.y_val = t0 * t2 * t5 + t1 * t3 * t4 #y
+    q.z_val = t1 * t2 * t4 - t0 * t3 * t5 #z
+    return q
+
 # Sets up the logging framework.
 # This allows us to log using simple print() statements.
 # The output is redirected to a unique file on the file share.
 def setup_logs(parameters):
-    output_dir = 'Z:\\logs\\{0}\\agent'.format(parameters['experiment_name'])
+    output_dir = os.path.join(os.getcwd, 'DistributedRL\\logs\\{0}\\agent'.format(parameters['experiment_name']))
     if not os.path.isdir(output_dir):
         try:
             os.makedirs(output_dir)
@@ -606,7 +594,25 @@ for arg in sys.argv:
         parameters['local_run'] = True
 
 #Make the debug statements easier to read
-np.set_printoptions(threshold=np.nan, suppress=True)
+#np.set_printoptions(threshold=np.nan, suppress=True)
+
+# Manually add parameters
+parameters['batch_update_frequency'] = 10
+parameters['max_epoch_runtime_sec'] = 30
+parameters['per_iter_epsilon_reduction'] = 0.003
+parameters['min_epsilon'] = 0.1
+parameters['batch_size'] = 32
+parameters['replay_memory_size'] = 50
+#parameters['weights_path'] = os.path.join(os.getcwd(), 'DistributedRL\\Share\\data\\pretrain_model_weights.h5')
+parameters['train_conv_layers'] = 'false'
+parameters['airsim_path'] = 'E:\\AD_Cookbook_AirSim\\'
+parameters['data_dir'] = os.path.join(os.getcwd(), 'DistributedRL\\Share')
+parameters['experiment_name'] = 'local_run'
+parameters['local_run'] = 'true'
+parameters['start_x'] = 500.0
+parameters['start_y'] = 850.0
+parameters['start_z'] = 32.0
+parameters['log_path'] = "..\\..\\Unreal Projects\Building99\Saved\\Logs\\Building_99.log"
 
 # Check additional parameters needed for local run
 if 'local_run' in parameters:

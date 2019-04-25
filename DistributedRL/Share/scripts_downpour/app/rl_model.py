@@ -10,7 +10,7 @@ from keras.models import Sequential, Model, clone_model, load_model
 from keras.layers import Conv2D, MaxPooling2D, Dropout, Flatten, Dense, Lambda, Input, concatenate
 from keras.layers.normalization import BatchNormalization
 from keras.layers.advanced_activations import ELU
-from keras.optimizers import Adam, SGD, Adamax, Nadam, Adagrad, Adadelta
+from keras.optimizers import Adam, SGD, Adamax, Nadam, Adagrad, Adadelta, RMSprop
 from keras.callbacks import ReduceLROnPlateau, ModelCheckpoint, CSVLogger, EarlyStopping
 import keras.backend as K
 from keras.preprocessing import image
@@ -31,24 +31,27 @@ class RlModel():
         self.__nb_actions = 5
         self.__gamma = 0.99
 
-        #Define the model
-        activation = 'relu'
-        pic_input = Input(shape=(59,255,3))
-        
-        img_stack = Conv2D(16, (3, 3), name='convolution0', padding='same', activation=activation, trainable=train_conv_layers)(pic_input)
-        img_stack = MaxPooling2D(pool_size=(2,2))(img_stack)
-        img_stack = Conv2D(32, (3, 3), activation=activation, padding='same', name='convolution1', trainable=train_conv_layers)(img_stack)
-        img_stack = MaxPooling2D(pool_size=(2, 2))(img_stack)
-        img_stack = Conv2D(32, (3, 3), activation=activation, padding='same', name='convolution2', trainable=train_conv_layers)(img_stack)
-        img_stack = MaxPooling2D(pool_size=(2, 2))(img_stack)
-        img_stack = Flatten()(img_stack)
-        img_stack = Dropout(0.2)(img_stack)
+        # Original DQN architecture from "Playing Atari with Deep Reinforcement Learning" 
+        # https://arxiv.org/pdf/1312.5602.pdf
 
-        img_stack = Dense(128, name='rl_dense', kernel_initializer=random_normal(stddev=0.01))(img_stack)
-        img_stack=Dropout(0.2)(img_stack)
+        activation = 'relu'
+        #pic_input = Input(shape=(59,255,3))
+        pic_input = Input(shape=(84,84,4))
+
+
+        # convolution stack
+        img_stack = Conv2D(32, 8, strides=(4, 4), name='convolution0', padding='valid', activation=activation, trainable=train_conv_layers)(pic_input)
+        img_stack = Conv2D(64, 4, strides=(2, 2), name='convolution1', padding='valid', activation=activation, trainable=train_conv_layers)(img_stack)
+        img_stack = Conv2D(64, 3, strides=(1, 1), name='convolution2', padding='valid', activation=activation, trainable=train_conv_layers)(img_stack)
+        # flatten
+        img_stack = Flatten()(img_stack)
+        #img_stack = Dropout(0.2)(img_stack)
+        # Fully connected layers
+        img_stack = Dense(512, name='rl_dense', activation=activation, kernel_initializer=random_normal(stddev=0.01))(img_stack)
         output = Dense(self.__nb_actions, name='rl_output', kernel_initializer=random_normal(stddev=0.01))(img_stack)
 
-        opt = Adam()
+        #opt = Adam()
+        opt = RMSprop()
         self.__action_model = Model(inputs=[pic_input], outputs=output)
 
         self.__action_model.compile(optimizer=opt, loss='mean_squared_error')
@@ -137,11 +140,13 @@ class RlModel():
         actions = list(batches['actions'])
         is_not_terminal = np.array(batches['is_not_terminal'])
         
-        # For now, our model only takes a single image in as input. 
-        # Only read in the last image from each set of examples
-        pre_states = pre_states[:, 3, :, :, :]
-        post_states = post_states[:, 3, :, :, :]
+        # Our model takes 4 consecutive images as input.
+        # NCHW -> NHWC
+        pre_states = pre_states.transpose(0, 2, 3, 1)
+        post_states = post_states.transpose(0, 2, 3, 1)
         
+        # desired pre states previous shape is: [N, 59, 255, 3]
+
         print('START GET GRADIENT UPDATE DEBUG')
         
         # We only have labels for the action that the agent actually took.
@@ -186,10 +191,9 @@ class RlModel():
         if (type(observation) == type([])):
             observation = np.array(observation)
         
-        # Our model only predicts on a single state.
-        # Take the latest image
-        observation = observation[3, :, :, :]
-        observation = observation.reshape(1, 59,255,3)
+        # Our model takes 4 consecutive images as input.
+        observation = observation.transpose(1,2,0)
+        observation = np.expand_dims(observation, axis=0)
         with self.__action_context.as_default():
             predicted_qs = self.__action_model.predict([observation])
 
@@ -200,7 +204,7 @@ class RlModel():
     # Convert the current state to control signals to drive the car.
     # As we are only predicting steering angle, we will use a simple controller to keep the car at a constant speed
     def state_to_control_signals(self, state, car_state):
-        if car_state.speed > 9:
+        if car_state.speed > 4:
             return (self.__angle_values[state], 0, 1)
         else:
             return (self.__angle_values[state], 1, 0)
