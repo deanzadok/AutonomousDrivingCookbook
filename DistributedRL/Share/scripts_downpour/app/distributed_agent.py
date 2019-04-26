@@ -80,7 +80,13 @@ class DistributedAgent():
         self.__log_file = parameters['log_path']
 
         # initiate coverage map
-        self.__coverage_map = CoverageMap(start_point=self.__start_point, map_size=10000, state_size=2000, input_size=84, height_threshold=0.9)
+        self.__coverage_map = CoverageMap(start_point=self.__start_point, map_size=12000, scale_ratio=10, state_size=400, input_size=84, height_threshold=0.9, reward_norm=10.0)
+
+        # create txt file
+        self.__rewards_log = open(os.path.join(self.__data_dir,'checkpoint',self.__experiment_name,"rewards.txt"),"w")
+        self.__rewards_log.write("Timestamp\tSum\tMean\n")
+        self.__rewards_log.close()
+
 
     # Starts the agent
     def start(self):
@@ -178,6 +184,15 @@ class DistributedAgent():
                         # If we successfully sampled, train on the collected minibatches and send the gradients to the trainer node
                         if (len(sampled_experiences) > 0):
                             print('Publishing AirSim Epoch.')
+
+                            # write all rewards to log file
+                            self.__rewards_log = open(os.path.join(self.__data_dir,'checkpoint',self.__experiment_name,"rewards.txt"),"a+")
+                            rewards_sum = 0
+                            for reward in sampled_experiences['rewards']:
+                                rewards_sum += reward
+                            self.__rewards_log.write("{}\t{}\t{}\n".format(time.time(),rewards_sum,rewards_sum/len(sampled_experiences['rewards'])))
+                            self.__rewards_log.close()
+
                             self.__publish_batch_and_update_model(sampled_experiences, frame_count)
             
             # Occasionally, the AirSim exe will stop working.
@@ -266,7 +281,8 @@ class DistributedAgent():
         stop_run_time =datetime.datetime.now() + datetime.timedelta(seconds=2)
         while(datetime.datetime.now() < stop_run_time):
             time.sleep(wait_delta_sec)
-            state_buffer = self.__append_to_ring_buffer(self.__get_cov_image(), state_buffer, state_buffer_len)
+            cov_image, _ = self.__get_cov_image()
+            state_buffer = self.__append_to_ring_buffer(cov_image, state_buffer, state_buffer_len)
         done = False
         actions = [] #records the state we go to
         pre_states = []
@@ -294,7 +310,7 @@ class DistributedAgent():
             # 2) Car is stopped
             # 3) The run has been running for longer than max_epoch_runtime_sec. 
             #       This constraint is so the model doesn't end up having to churn through huge chunks of data, slowing down training
-            if (collision_info.has_collided or car_state.speed < 0.5 or utc_now > end_time):
+            if (collision_info.has_collided or abs(car_state.speed) < 0.02 or utc_now > end_time):
                 print('Start time: {0}, end time: {1}'.format(start_time, utc_now), file=sys.stderr)
                 if (utc_now > end_time):
                     print('timed out.')
@@ -316,22 +332,31 @@ class DistributedAgent():
                     print('Model predicts {0}'.format(next_state))
 
                 # Convert the selected state to a control signal
-                next_control_signals = self.__model.state_to_control_signals(next_state, self.__car_client.getCarState())
+                next_steering, is_reverse, next_brake = self.__model.state_to_control_signals(next_state, self.__car_client.getCarState())
 
                 # Take the action
-                self.__car_controls.steering = next_control_signals[0]
-                self.__car_controls.throttle = next_control_signals[1]
-                self.__car_controls.brake = next_control_signals[2]
+                self.__car_controls.steering = next_steering
+                self.__car_controls.brake = next_brake
+                if is_reverse:
+                    self.__car_controls.throttle = -0.4
+                    self.__car_controls.is_manual_gear = True
+                    self.__car_controls.manual_gear = -1
+                else:
+                    self.__car_controls.throttle = 0.4
+                    self.__car_controls.is_manual_gear = False
+                    self.__car_controls.manual_gear = 0
+
                 self.__car_client.setCarControls(self.__car_controls)
                 
                 # Wait for a short period of time to see outcome
                 time.sleep(wait_delta_sec)
 
                 # Observe outcome and compute reward from action
-                state_buffer = self.__append_to_ring_buffer(self.__get_cov_image(), state_buffer, state_buffer_len)
+                post_cov_image, cov_reward = self.__get_cov_image()
+                state_buffer = self.__append_to_ring_buffer(post_cov_image, state_buffer, state_buffer_len)
                 car_state = self.__car_client.getCarState()
                 collision_info = self.__car_client.simGetCollisionInfo()
-                reward = self.__compute_reward(collision_info, car_state, pre_state, state_buffer)
+                reward = self.__compute_reward(collision_info, car_state, cov_reward)
                 
                 # Add the experience to the set of examples from this iteration
                 pre_states.append(pre_state)
@@ -467,14 +492,14 @@ class DistributedAgent():
     # Gets a coverage image from AirSim
     def __get_cov_image(self):
 
-        state = self.__coverage_map.get_state()
+        state, cov_reward = self.__coverage_map.get_state()
         state = state / 255.0
 
         # debug only
         # im = PIL.Image.fromarray(np.uint8(state))
         # im.save("DistributedRL\\debug\\{}.png".format(time.time()))
 
-        return state
+        return state, cov_reward
 
     # Gets an image from AirSim
     def __get_image(self):
@@ -485,17 +510,17 @@ class DistributedAgent():
         return image_rgba[76:135,0:255,0:3].astype(float)
 
     # Computes the reward functinon based on collision.
-    def __compute_reward(self, collision_info, car_state, pre_state, post_state):
+    def __compute_reward(self, collision_info, car_state, cov_reward):
 
         # If the car has collided, the reward is always zero
         if (collision_info.has_collided):
             return 0.0
 
-        # Get the current state of the vehicle
-        car_state = self.__car_client.getCarState()
-        pos = car_state.kinematics_estimated.position
+        # If the car has stopped for some reason, the reward is always zero
+        if abs(car_state.speed) < 0.02:
+            return 0.0
 
-        return 1.0
+        return cov_reward
 
     # get most newly generated random point
     def __get_next_generated_random_point(self):

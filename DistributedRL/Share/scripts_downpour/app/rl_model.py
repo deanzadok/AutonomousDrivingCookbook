@@ -26,9 +26,15 @@ K.set_session(session)
 # A wrapper class for the DQN model
 class RlModel():
     def __init__(self, weights_path, train_conv_layers):
-        self.__angle_values = [-1, -0.5, 0, 0.5, 1]
 
-        self.__nb_actions = 5
+        # actions list. each action will be in the form of [steering, is_reverse]
+        self.__actions = [[-1.0, False],
+                          [0.0, False],
+                          [1.0, False],
+                          [-1.0, True],
+                          [0.0, True],
+                          [1.0, True]]
+
         self.__gamma = 0.99
 
         # Original DQN architecture from "Playing Atari with Deep Reinforcement Learning" 
@@ -48,7 +54,7 @@ class RlModel():
         #img_stack = Dropout(0.2)(img_stack)
         # Fully connected layers
         img_stack = Dense(512, name='rl_dense', activation=activation, kernel_initializer=random_normal(stddev=0.01))(img_stack)
-        output = Dense(self.__nb_actions, name='rl_output', kernel_initializer=random_normal(stddev=0.01))(img_stack)
+        output = Dense(len(self.__actions), name='rl_output', kernel_initializer=random_normal(stddev=0.01))(img_stack)
 
         #opt = Adam()
         opt = RMSprop()
@@ -204,12 +210,13 @@ class RlModel():
     # Convert the current state to control signals to drive the car.
     # As we are only predicting steering angle, we will use a simple controller to keep the car at a constant speed
     def state_to_control_signals(self, state, car_state):
+
         if car_state.speed > 4:
-            return (self.__angle_values[state], 0, 1)
+            return (self.__actions[state][0], self.__actions[state][1], 1.0)
         else:
-            return (self.__angle_values[state], 1, 0)
+            return (self.__actions[state][0], self.__actions[state][1], 0.0)
 
     # Gets a random state
     # Used during annealing
     def get_random_state(self):
-        return np.random.randint(low=0, high=(self.__nb_actions) - 1)
+        return np.random.randint(low=0, high=len(self.__actions) - 1)

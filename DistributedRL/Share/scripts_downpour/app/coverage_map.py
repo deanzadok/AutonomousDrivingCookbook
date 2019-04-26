@@ -11,34 +11,32 @@ import copy
 class CoverageMap:
 
     # initiate coverage map
-    def __init__(self, start_point, map_size, state_size, input_size, height_threshold):
+    def __init__(self, start_point, map_size, scale_ratio, state_size, input_size, height_threshold, reward_norm):
 
         self.start_point = start_point # agent's starting point from the simulation, in centimeters
         self.map_size = map_size # map size to be in the shape of [map_size, map_size], in centimeters
+        self.scale_ratio = scale_ratio # scale ratio to be used to reduce the map size and increase performance
         self.state_size = state_size # state size to be in the shape of [state_size, state_size], in centimeters
         self.input_size = input_size # final input size to be in the shape of [input_size, input_size], in centimeters
         self.height_threshold = height_threshold # height_threshold, in meters
         self.saved_state = None # save state in each iteration
+        self.reward_norm = reward_norm # factor to normalize the reward
 
         # prepare clean coverage map
-        self.cov_map = np.zeros((self.map_size, self.map_size))
+        self.cov_map = np.zeros((int(self.map_size / self.scale_ratio), int(self.map_size / self.scale_ratio)))
         self.previous_cov_map = copy.deepcopy(self.cov_map)
 
     # clear coverage map and state
     def reset(self):
 
         self.saved_state = None
-        self.cov_map = np.zeros((self.map_size, self.map_size))
+        self.cov_map = np.zeros((int(self.map_size / self.scale_ratio), int(self.map_size / self.scale_ratio)))
+        self.previous_cov_map = copy.deepcopy(self.cov_map)
 
     # set airsim client, to get position, orientation and lidar data
     def set_client(self, client):
 
-        self.client = client 
-
-    # get the amount of new terain reveiled by the agent
-    def get_progress(self):
-
-        return np.subtract(self.cov_map, self.previous_cov_map).sum()
+        self.client = client
 
     # get the entire map, rescaled to the input size
     def get_map_scaled(self):
@@ -61,12 +59,12 @@ class CoverageMap:
         # update previous coverage map
         self.previous_cov_map = copy.deepcopy(self.cov_map)
 
-        # get car position. convert it to be relative to the world in centimeters
+        # get car position, convert it to be relative to the world in centimeters, and convert it according to scale ratio
         client_pose = self.client.simGetVehiclePose()
-        pose = [int(self.start_point[0] + (self.map_size / 2) - (client_pose.position.x_val * 100.0)), 
-                int(self.start_point[1] + (self.map_size / 2) + (client_pose.position.y_val * 100.0)),
-                int(self.start_point[2] + (self.map_size / 2) + (client_pose.position.z_val * 100.0))]
-        
+        pose = [int(round((self.start_point[0] + (self.map_size / 2) - (client_pose.position.x_val * 100.0))/self.scale_ratio)), 
+                int(round((self.start_point[1] + (self.map_size / 2) + (client_pose.position.y_val * 100.0))/self.scale_ratio)),
+                int(round((self.start_point[2] + (self.map_size / 2) + (client_pose.position.z_val * 100.0))/self.scale_ratio))]
+
         # get car orientation
         angles = airsim.to_eularian_angles(client_pose.orientation)
 
@@ -92,13 +90,13 @@ class CoverageMap:
             points_trimmed = np.dot(points_trimmed, rot_matrix)
 
             # convert it to be relative to the world in centimeters, z axis is not relevant 
-            points_trimmed[:,0] = np.subtract(pose[0],points_trimmed[:,0] * 100.0)
-            points_trimmed[:,1] = np.add(pose[1],points_trimmed[:,1] * 100.0)
+            points_trimmed[:,0] = np.subtract(pose[0],np.rint(points_trimmed[:,0] * 100.0 / self.scale_ratio))
+            points_trimmed[:,1] = np.add(pose[1],np.rint(points_trimmed[:,1] * 100.0 / self.scale_ratio))
             points_trimmed = points_trimmed.astype(int)
             
             # paint selected indexes
             for i in range(points_trimmed.shape[0]):
-                self.cov_map[points_trimmed[i][0],points_trimmed[i][1]] = 200
+                self.cov_map[points_trimmed[i][0],points_trimmed[i][1]] = 255
 
             # extract state from nav map
             x_range = (int(pose[0] - self.state_size/2), int(pose[0] + self.state_size/2))
@@ -121,7 +119,10 @@ class CoverageMap:
             self.saved_state = state[int(state.shape[0]/2 - state.shape[0]/4):int(state.shape[0]/2 + state.shape[0]/4), 
                             int(state.shape[1]/2 - state.shape[1]/4):int(state.shape[1]/2 + state.shape[1]/4)]
             
-            return self.saved_state
+            # compute reward depend on the previous map
+            reward = min((np.subtract(self.cov_map, self.previous_cov_map).sum()) / (255.0 * self.reward_norm),1.0)
+
+            return self.saved_state, reward
 
 
 
@@ -133,16 +134,16 @@ if __name__ == "__main__":
 
     start_point = [500.0, 850.0, 32.0]
 
-    covMap = CoverageMap(start_point=start_point, map_size=10000, state_size=2000, input_size=84, height_threshold=0.9)
+    covMap = CoverageMap(start_point=start_point, map_size=12000, scale_ratio=10, state_size=400, input_size=84, height_threshold=0.9, reward_norm=10.0)
     covMap.set_client(client=client)
+    max_r = 0
+    i = 0
 
     while True:
         startTime = time.time()
 
-        state = covMap.get_state()
-        #maps = covMap.get_map_scaled()
-
-        reward = covMap.get_progress()
+        state, reward = covMap.get_state()
+        state = covMap.get_map_scaled()
 
         cv2.imshow('navigation map (q to exit)', state)
         if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -150,7 +151,11 @@ if __name__ == "__main__":
 
         endTime = time.time()
         # present fps
-        print("reward: {}, fps: {}".format(reward, 1/(endTime-startTime)))
+        #print("fps: {}".format(1/(endTime-startTime)))
+        if i % 10 == 0:
+            print("reward: {}".format(reward))
+
+        i+=1
         
 
     cv2.destroyAllWindows()
