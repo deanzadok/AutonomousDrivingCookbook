@@ -6,10 +6,13 @@ import numpy as np
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--batch_size', '-batch_size', help='size of the sum of the rewards', default=1000, type=int)
-parser.add_argument('--density', '-density', help='configure plot density', default=0.2, type=float)
+parser.add_argument('--density', '-density', help='configure plot density', default=0.01, type=float)
+parser.add_argument('--path', '-path', help='rewards file path', default='C:\\Users\\t-dezado\\Desktop\\rewards.txt', type=str)
 args = parser.parse_args()
 
-current_df = pd.read_csv(os.path.join(os.getcwd(), 'DistributedRL\\Share\\checkpoint\\local_run\\rewards.txt'), sep='\t')
+#old_path = os.path.join(os.getcwd(), 'DistributedRL\\Share\\checkpoint\\local_run\\rewards.txt')
+
+current_df = pd.read_csv(args.path, sep='\t')
 sums = []
 means = []
 
