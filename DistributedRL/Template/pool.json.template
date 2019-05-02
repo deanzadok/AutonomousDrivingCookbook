@@ -12,10 +12,10 @@
 	"startTask": {
 		"commandLine": "C:\\ProgramData\\Anaconda3\\Scripts\\activate.bat py36 && python C:\\prereq\\setup_machine.py",
 		"resourceFiles": [{
-			"blobSource": "https://{storage_account_name}.blob.core.windows.net/prereq/setup_machine.py",
+			"httpUrl": "https://{storage_account_name}.blob.core.windows.net/prereq/setup_machine.py",
 			"filePath": "C:\\prereq\\setup_machine.py"
 		}, {
-			"blobSource": "https://{storage_account_name}.blob.core.windows.net/prereq/mount.bat",
+			"httpUrl": "https://{storage_account_name}.blob.core.windows.net/prereq/mount.bat",
 			"filePath": "C:\\prereq\\mount.bat"
 		}],
 		"userIdentity": {

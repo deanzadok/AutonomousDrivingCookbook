@@ -10,4 +10,5 @@ Param(
 az login
 az account set --subscription $subscriptionId 
 az batch account set --resource-group $resourceGroupName --name $batchAccountName
+az batch account login --resource-group $resourceGroupName --name $batchAccountName
 az batch pool create --json-file pool.json
