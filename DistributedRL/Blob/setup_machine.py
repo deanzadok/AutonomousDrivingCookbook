@@ -32,7 +32,6 @@ with open('C:/prereq/log.txt', 'w') as f:
     do_command('pip install django-ipware==2.0.1')
     do_command('pip install requests==2.18.4')
     do_command('pip install opencv-python')
-    do_command('pip install airsim')
 
     # Mount the file share
     do_command('call C:\\prereq\\mount.bat')

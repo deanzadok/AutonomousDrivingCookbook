@@ -1,5 +1,6 @@
 #from airsim_client import *
 from rl_model import RlModel
+import setup_path 
 import airsim
 import msgpackrpc
 import time
@@ -18,6 +19,7 @@ import PIL
 import copy
 import datetime
 from coverage_map import CoverageMap
+import errno
 
 # A class that represents the agent that will drive the vehicle, train the model, and send the gradient updates to the trainer.
 class DistributedAgent():
@@ -83,7 +85,9 @@ class DistributedAgent():
         self.__coverage_map = CoverageMap(start_point=self.__start_point, map_size=12000, scale_ratio=10, state_size=400, input_size=84, height_threshold=0.9, reward_norm=10.0)
 
         # create txt file
-        self.__rewards_log = open(os.path.join(self.__data_dir,'checkpoint',self.__experiment_name,"rewards.txt"),"w")
+        if not os.path.isdir(os.path.join(self.__data_dir,'\\checkpoint',self.__experiment_name)):
+            os.makedirs(os.path.join(self.__data_dir,'\\checkpoint',self.__experiment_name))
+        self.__rewards_log = open(os.path.join(self.__data_dir,'\\checkpoint',self.__experiment_name,"rewards.txt"),"w")
         self.__rewards_log.write("Timestamp\tSum\tMean\n")
         self.__rewards_log.close()
 
@@ -524,7 +528,7 @@ class DistributedAgent():
 
     # get most newly generated random point
     def __get_next_generated_random_point(self):
-        
+        """
         # grab the newest line with generated random point
         newest_rp = "None"
 
@@ -547,7 +551,8 @@ class DistributedAgent():
         
         # filter random point from line
         random_point = [float(newest_rp.split(" ")[-3].split("=")[1]), float(newest_rp.split(" ")[-2].split("=")[1]), float(newest_rp.split(" ")[-1].split("=")[1])]
-
+        """
+        random_point = [500.0, 850.0, 32.0]
         return random_point
 
     # Randomly selects a starting point on the road
@@ -598,7 +603,7 @@ def toQuaternion(pitch, roll, yaw):
 # This allows us to log using simple print() statements.
 # The output is redirected to a unique file on the file share.
 def setup_logs(parameters):
-    output_dir = os.path.join(os.getcwd, 'DistributedRL\\logs\\{0}\\agent'.format(parameters['experiment_name']))
+    output_dir = 'Z:\\logs\\{0}\\agent'.format(parameters['experiment_name'])
     if not os.path.isdir(output_dir):
         try:
             os.makedirs(output_dir)
@@ -622,22 +627,36 @@ for arg in sys.argv:
 #np.set_printoptions(threshold=np.nan, suppress=True)
 
 # Manually add parameters
-parameters['batch_update_frequency'] = 10
-parameters['max_epoch_runtime_sec'] = 30
-parameters['per_iter_epsilon_reduction'] = 0.003
-parameters['min_epsilon'] = 0.1
-parameters['batch_size'] = 32
-parameters['replay_memory_size'] = 50
-#parameters['weights_path'] = os.path.join(os.getcwd(), 'DistributedRL\\Share\\data\\pretrain_model_weights.h5')
-parameters['train_conv_layers'] = 'false'
-parameters['airsim_path'] = 'E:\\AD_Cookbook_AirSim\\'
-parameters['data_dir'] = os.path.join(os.getcwd(), 'DistributedRL\\Share')
-parameters['experiment_name'] = 'local_run'
-parameters['local_run'] = 'true'
-parameters['start_x'] = 500.0
-parameters['start_y'] = 850.0
-parameters['start_z'] = 32.0
-parameters['log_path'] = "..\\..\\Unreal Projects\Building99\Saved\\Logs\\Building_99.log"
+if 'batch_update_frequency' not in parameters.keys(): 
+    parameters['batch_update_frequency'] = 300
+if 'max_epoch_runtime_sec' not in parameters.keys(): 
+    parameters['max_epoch_runtime_sec'] = 30
+if 'per_iter_epsilon_reduction' not in parameters.keys(): 
+    parameters['per_iter_epsilon_reduction'] = 0.003
+if 'min_epsilon' not in parameters.keys(): 
+    parameters['min_epsilon'] = 0.1
+if 'batch_size' not in parameters.keys(): 
+    parameters['batch_size'] = 32
+if 'replay_memory_size' not in parameters.keys(): 
+    parameters['replay_memory_size'] = 2000
+if 'train_conv_layers' not in parameters.keys(): 
+    parameters['train_conv_layers'] = 'false'
+if 'airsim_path' not in parameters.keys(): 
+    parameters['airsim_path'] = 'E:\\AD_Cookbook_AirSim\\'
+if 'data_dir' not in parameters.keys(): 
+    parameters['data_dir'] = os.path.join(os.getcwd(), 'DistributedRL\\Share')
+if 'experiment_name' not in parameters.keys(): 
+    parameters['experiment_name'] = 'local_run'
+if 'local_run' not in parameters.keys(): 
+    parameters['local_run'] = 'true'
+if 'start_x' not in parameters.keys(): 
+    parameters['start_x'] = 500.0
+if 'start_y' not in parameters.keys(): 
+    parameters['start_y'] = 850.0
+if 'start_z' not in parameters.keys(): 
+    parameters['start_z'] = 32.0
+if 'log_path' not in parameters.keys(): 
+    parameters['log_path'] = "..\\..\\Unreal Projects\Building99\Saved\\Logs\\Building_99.log"
 
 # Check additional parameters needed for local run
 if 'local_run' in parameters:
