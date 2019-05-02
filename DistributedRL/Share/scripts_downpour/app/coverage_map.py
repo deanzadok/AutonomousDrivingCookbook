@@ -1,11 +1,10 @@
+import setup_path
 import airsim
 import cv2
 import numpy as np
 import math
-from scipy.ndimage import rotate
 import time
 from PIL import Image
-import pptk
 import copy
 
 class CoverageMap:
@@ -16,7 +15,7 @@ class CoverageMap:
         self.start_point = start_point # agent's starting point from the simulation, in centimeters
         self.map_size = map_size # map size to be in the shape of [map_size, map_size], in centimeters
         self.scale_ratio = scale_ratio # scale ratio to be used to reduce the map size and increase performance
-        self.state_size = state_size # state size to be in the shape of [state_size, state_size], in centimeters
+        self.state_size = int(state_size / self.scale_ratio) # state size to be in the shape of [state_size, state_size], in centimeters
         self.input_size = input_size # final input size to be in the shape of [input_size, input_size], in centimeters
         self.height_threshold = height_threshold # height_threshold, in meters
         self.saved_state = None # save state in each iteration
@@ -24,14 +23,12 @@ class CoverageMap:
 
         # prepare clean coverage map
         self.cov_map = np.zeros((int(self.map_size / self.scale_ratio), int(self.map_size / self.scale_ratio)))
-        self.previous_cov_map = copy.deepcopy(self.cov_map)
 
     # clear coverage map and state
     def reset(self):
 
         self.saved_state = None
         self.cov_map = np.zeros((int(self.map_size / self.scale_ratio), int(self.map_size / self.scale_ratio)))
-        self.previous_cov_map = copy.deepcopy(self.cov_map)
 
     # set airsim client, to get position, orientation and lidar data
     def set_client(self, client):
@@ -41,7 +38,7 @@ class CoverageMap:
     # get the entire map, rescaled to the input size
     def get_map_scaled(self):
 
-        # TODO: find a better method to resize
+        # TODO: resize without PIL
         # resize coverage image using PIL
         im = Image.fromarray(np.uint8(self.cov_map))
         im = im.resize((self.input_size,self.input_size), Image.BILINEAR)
@@ -55,9 +52,6 @@ class CoverageMap:
 
     # get state image from the coverage map
     def get_state(self):
-
-        # update previous coverage map
-        self.previous_cov_map = copy.deepcopy(self.cov_map)
 
         # get car position, convert it to be relative to the world in centimeters, and convert it according to scale ratio
         client_pose = self.client.simGetVehiclePose()
@@ -94,18 +88,17 @@ class CoverageMap:
             points_trimmed[:,1] = np.add(pose[1],np.rint(points_trimmed[:,1] * 100.0 / self.scale_ratio))
             points_trimmed = points_trimmed.astype(int)
             
-            # paint selected indexes
+            # paint selected indexes, and sum new pixels
+            new_pixels = 0
             for i in range(points_trimmed.shape[0]):
-                self.cov_map[points_trimmed[i][0],points_trimmed[i][1]] = 255
+                if self.cov_map[points_trimmed[i][0],points_trimmed[i][1]] == 0:
+                    self.cov_map[points_trimmed[i][0],points_trimmed[i][1]] = 255
+                    new_pixels += 1
 
             # extract state from nav map
             x_range = (int(pose[0] - self.state_size/2), int(pose[0] + self.state_size/2))
             y_range = (int(pose[1] - self.state_size/2), int(pose[1] + self.state_size/2))
             state = self.cov_map[x_range[0]:x_range[1],y_range[0]:y_range[1]]
-            
-            # make it more visible
-            #idxs = np.where(state > 0.0)
-            #state[idxs] = 255.0
 
             # scale using PIL
             im = Image.fromarray(np.uint8(state))
@@ -119,44 +112,44 @@ class CoverageMap:
             self.saved_state = state[int(state.shape[0]/2 - state.shape[0]/4):int(state.shape[0]/2 + state.shape[0]/4), 
                             int(state.shape[1]/2 - state.shape[1]/4):int(state.shape[1]/2 + state.shape[1]/4)]
             
-            # compute reward depend on the previous map
-            reward = min((np.subtract(self.cov_map, self.previous_cov_map).sum()) / (255.0 * self.reward_norm),1.0)
-
-            return self.saved_state, reward
+            # send state as input and reward
+            return self.saved_state, min(new_pixels / self.reward_norm, 1.0)
 
 
 
 if __name__ == "__main__":
 
-    # connect to the AirSim simulator 
+    # connect to AirSim 
     client = airsim.CarClient()
     client.confirmConnection()
 
+    # create coverage map and connect to client
     start_point = [500.0, 850.0, 32.0]
-
-    covMap = CoverageMap(start_point=start_point, map_size=12000, scale_ratio=10, state_size=400, input_size=84, height_threshold=0.9, reward_norm=10.0)
+    covMap = CoverageMap(start_point=start_point, map_size=12000, scale_ratio=1, state_size=2000, input_size=84, height_threshold=0.95, reward_norm=1000.0)
     covMap.set_client(client=client)
-    max_r = 0
-    i = 0
 
+    # start free run session
+    i = 1
+    fps_sum = 0
     while True:
         startTime = time.time()
 
+        # get state and show it on screen
         state, reward = covMap.get_state()
-        state = covMap.get_map_scaled()
+        #state = covMap.get_map_scaled()
 
         cv2.imshow('navigation map (q to exit)', state)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
         endTime = time.time()
-        # present fps
-        #print("fps: {}".format(1/(endTime-startTime)))
-        if i % 10 == 0:
+
+        # present fps or reward
+        fps_sum += (1/(endTime-startTime))
+        #print("fps average: %.2f" % (fps_sum/i))
+        if i % 3 == 0:
             print("reward: {}".format(reward))
 
         i+=1
         
-
     cv2.destroyAllWindows()
-
