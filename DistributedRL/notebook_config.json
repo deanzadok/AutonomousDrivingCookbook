@@ -1,14 +1,14 @@
 {
     "subscription_id": "f4a777ae-540c-4214-ac89-6806513322a7",
     "resource_group_name": "ExplorationRL",
-    "storage_account_name": "explorationrl",
-    "storage_account_key": "sLeJqGLUIldcg3D9zPWYw2FwUGUsvjf8q9QSITB+ZXpQLCo+f7XFzn/kN9OYfmmn3LmyZUI5VYB21wF8Fa/DJw==",
-    "file_share_name": "erl_fileshare",
-    "batch_account_name": "explorationrl",
-    "batch_account_key": "UognMWFM3PSrBelzt5lHvBQQEicMKxJwe/V3cAfoZf/Gj2ggUCA70Gb8x2nBwfOrtnGZfcl/uYLG0IG66qOOwg==",
-    "batch_account_url": "https://explorationrl.westus.batch.azure.com",
+    "storage_account_name": "explorationrlsa",
+    "storage_account_key": "e8SKhxauER4Ju1oJidJsa14lsVOTs0b+Wyw+XGLpWHQD8DxZaC7N/L/NxKZm0w/1Gq0369HbHSZ2nLJzXZrgdg==",
+    "file_share_name": "share",
+    "batch_account_name": "explorationrlba",
+    "batch_account_key": "FRgetndMUElF5q5CvDLpQJiWe662BklFzV539u3Q4yDxh+3Df34+bI2585p8GUkM8hd7adqutwiWJcDcCZBbqg==",
+    "batch_account_url": "https://explorationrlba.eastus.batch.azure.com",
     "batch_job_user_name": "explorationrl",
-    "batch_job_user_password": "erl3232",
+    "batch_job_user_password": "Erl53232",
     "batch_pool_name": "erl_pool",
-    "batch_pool_size": 6
+    "batch_pool_size": 8
 }
