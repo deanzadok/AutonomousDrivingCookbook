@@ -1,0 +1,31 @@
+{
+	"id": "erl_pool",
+	"vmSize": "STANDARD_NV6",
+	"virtualMachineConfiguration": {
+		"imageReference": {
+			"virtualMachineImageId": "/subscriptions/f4a777ae-540c-4214-ac89-6806513322a7/resourceGroups/ExplorationRL/providers/Microsoft.Compute/images/AirsimImage"
+		},
+		"nodeAgentSKUId": "batch.node.windows amd64"
+	},
+	"targetDedicatedNodes": 8,
+	"enableInterNodeCommunication": true,
+	"startTask": {
+		"commandLine": "C:\\ProgramData\\Anaconda3\\Scripts\\activate.bat py36 && python C:\\prereq\\setup_machine.py",
+		"resourceFiles": [{
+			"httpUrl": "https://explorationrlsa.blob.core.windows.net/prereq/setup_machine.py",
+			"filePath": "C:\\prereq\\setup_machine.py"
+		}, {
+			"httpUrl": "https://explorationrlsa.blob.core.windows.net/prereq/mount.bat",
+			"filePath": "C:\\prereq\\mount.bat"
+		}],
+		"userIdentity": {
+			"username": "explorationrl"
+		},
+		"waitForSuccess": true
+	},
+	"userAccounts": [{
+		"name": "explorationrl",
+		"password": "Erl53232",
+		"elevationLevel": "admin"
+	}]
+}

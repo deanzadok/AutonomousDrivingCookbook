@@ -31,19 +31,22 @@ with open('C:/prereq/log.txt', 'w') as f:
     do_command('pip install django==2.0.1')
     do_command('pip install django-ipware==2.0.1')
     do_command('pip install requests==2.18.4')
-    
+    do_command('pip install opencv-python')
+    do_command('pip install airsim')
+
     # Mount the file share
     do_command('call C:\\prereq\\mount.bat')
     do_command('dir z: >> C:\\prereq\\list.txt')
     
-    # Configure AirSim to use the car
-    do_command('mkdir D:\\Users\\{batch_job_user_name}\\Documents\\AirSim')
-    do_command('echo {"SettingsVersion": 1.0, "SimMode": "Car"} > D:\\Users\\{batch_job_user_name}\\Documents\\AirSim\\settings.json')
+    # Configure AirSim to use the same json file
+    if not os.path.isdir('D:\\Users\\explorationrl\\Documents\\AirSim'):
+        do_command('mkdir D:\\Users\\explorationrl\\Documents\\AirSim')
+    do_command('"C:\\Program Files (x86)\\Microsoft SDKs\\Azure\\AzCopy\\AzCopy.exe" /Source:https://explorationrlsa.blob.core.windows.net/prereq/settings.json /Dest:D:\\Users\\explorationrl\\Documents\\AirSim\\settings.json')
     do_command('call C:\\prereq\\mount.bat')
     
     # Download AirSim if it's not already on disk.
     if not os.path.isdir('D:\\AD_Cookbook_AirSim'):
-        do_command('"C:\\Program Files (x86)\\Microsoft SDKs\\Azure\\AzCopy\\AzCopy.exe" /Source:https://airsimtutorialdataset.blob.core.windows.net/e2edl/AD_Cookbook_AirSim.7z /Dest:D:\\\\tmp.7z')
+        do_command('"C:\\Program Files (x86)\\Microsoft SDKs\\Azure\\AzCopy\\AzCopy.exe" /Source:https://explorationrlsa.blob.core.windows.net/prereq/AD_Cookbook_AirSim.7z /Dest:D:\\\\tmp.7z')
         do_command('Z:\\tools\\7za.exe x D:\\tmp.7z -oD:\\ -y -r')
     
     # Set up visualization scheduled task.

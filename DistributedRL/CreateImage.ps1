@@ -12,8 +12,15 @@ Param(
 Login-AzureRMAccount
 Select-AzureRmSubscription -SubscriptionId $subscriptionId
 
-$cmd = 'azcopy /Source:https://airsimimage.blob.core.windows.net/airsimimage/AirsimImage.vhd /Dest:https://{0}.blob.core.windows.net/prereq/AirsimImage.vhd /destKey:{1}' -f $storageAccountName, $storageAccountKey
+$cmd = 'cd "C:\Program Files (x86)\Microsoft SDKs\Azure\AzCopy" ; .\AzCopy.exe /Source:https://airsimimage.blob.core.windows.net/airsimimage/AirsimImage.vhd /Dest:https://{0}.blob.core.windows.net/prereq/AirsimImage.vhd /destKey:{1}' -f $storageAccountName, $storageAccountKey
+write-host $cmd
+iex $cmd
 
+$cmd = 'cd "C:\Program Files (x86)\Microsoft SDKs\Azure\AzCopy" ; .\AzCopy.exe /Source:"C:\\Users\\t-dezado\\Documents\\Unreal Projects\\AD_Cookbook_AirSim.7z" /Dest:https://{0}.blob.core.windows.net/prereq/AD_Cookbook_AirSim.7z /destKey:{1}' -f $storageAccountName, $storageAccountKey
+write-host $cmd
+iex $cmd
+
+$cmd = 'cd "C:\Program Files (x86)\Microsoft SDKs\Azure\AzCopy" ; .\AzCopy.exe /Source:"C:\\Users\\t-dezado\\Documents\\AirSim\\settings.json" /Dest:https://{0}.blob.core.windows.net/prereq/settings.json /destKey:{1}' -f $storageAccountName, $storageAccountKey
 write-host $cmd
 iex $cmd
 

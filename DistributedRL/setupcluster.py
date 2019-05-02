@@ -101,9 +101,8 @@ for root, directories, files in os.walk('Blob'):
             )
 
 # create image
-os.system('powershell.exe ".\\CreateImage.ps1 -subscriptionId {0} -storageAccountName {1} -storageAccountKey {2} -resourceGroupName {3}'\
-          .format(NOTEBOOK_CONFIG['subscription_id'], NOTEBOOK_CONFIG['storage_account_name'], NOTEBOOK_CONFIG['storage_account_key'], NOTEBOOK_CONFIG['resource_group_name']))
-
+#os.system('powershell.exe ".\\CreateImage.ps1 -subscriptionId {0} -storageAccountName {1} -storageAccountKey {2} -resourceGroupName {3}'\
+#          .format(NOTEBOOK_CONFIG['subscription_id'], NOTEBOOK_CONFIG['storage_account_name'], NOTEBOOK_CONFIG['storage_account_key'], NOTEBOOK_CONFIG['resource_group_name']))
 
 with open('Template\\pool.json.template', 'r') as f:
     pool_config = f.read()
@@ -119,7 +118,7 @@ pool_config = pool_config\
 
 with open('pool.json', 'w') as f:
     f.write(pool_config)
-    
+
 create_cmd = 'powershell.exe ".\ProvisionCluster.ps1 -subscriptionId {0} -resourceGroupName {1} -batchAccountName {2}"'\
     .format(NOTEBOOK_CONFIG['subscription_id'], NOTEBOOK_CONFIG['resource_group_name'], NOTEBOOK_CONFIG['batch_account_name'])
     
