@@ -13,9 +13,9 @@ os.chdir(".\\DistributedRL")
 with open('notebook_config.json', 'r') as f:
     NOTEBOOK_CONFIG = json.loads(f.read())
 
-batch_update_frequency = 300
+batch_update_frequency = 10000
 max_epoch_runtime_sec = 30
-per_iter_epsilon_reduction=0.003
+per_iter_epsilon_reduction=0.0001
 min_epsilon = 0.1
 batch_size = 32
 replay_memory_size = 2000

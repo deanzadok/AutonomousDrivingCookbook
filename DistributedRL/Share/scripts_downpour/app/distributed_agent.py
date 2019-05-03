@@ -82,7 +82,7 @@ class DistributedAgent():
         self.__log_file = parameters['log_path']
 
         # initiate coverage map
-        self.__coverage_map = CoverageMap(start_point=self.__start_point, map_size=12000, scale_ratio=10, state_size=400, input_size=84, height_threshold=0.9, reward_norm=10.0)
+        self.__coverage_map = CoverageMap(start_point=self.__start_point, map_size=12000, scale_ratio=1, state_size=2000, input_size=84, height_threshold=0.95, reward_norm=1000.0)
 
         # create txt file
         if not os.path.isdir(os.path.join(self.__data_dir,'\\checkpoint',self.__experiment_name)):
@@ -497,11 +497,13 @@ class DistributedAgent():
     def __get_cov_image(self):
 
         state, cov_reward = self.__coverage_map.get_state()
-        state = state / 255.0
 
         # debug only
-        # im = PIL.Image.fromarray(np.uint8(state))
-        # im.save("DistributedRL\\debug\\{}.png".format(time.time()))
+        #im = PIL.Image.fromarray(np.uint8(state))
+        #im.save("DistributedRL\\debug\\{}.png".format(time.time()))
+        
+        # normalize state
+        state = state / 255.0
 
         return state, cov_reward
 

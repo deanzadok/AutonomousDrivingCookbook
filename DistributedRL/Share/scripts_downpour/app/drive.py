@@ -11,7 +11,7 @@ from coverage_map import CoverageMap
 import os
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--path', '-path', help='model file path', default='C:\\Users\\t-dezado\\Desktop\\973347.json', type=str)
+parser.add_argument('--path', '-path', help='model file path', default='C:\\Users\\t-dezado\\Desktop\\1288868.json', type=str)
 args = parser.parse_args()
 
 #old_path = os.path.join(os.getcwd(),"DistributedRL\\Share\\checkpoint\\local_run","700227.json")

@@ -1,5 +1,5 @@
 {
-	"id": "erl_pool",
+	"id": "erl_pool01",
 	"vmSize": "STANDARD_NV6",
 	"virtualMachineConfiguration": {
 		"imageReference": {

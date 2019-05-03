@@ -1,6 +1,7 @@
 import os
 import sys
 import argparse
+import errno
 
 def setup_logs():
     output_dir = 'Z:\\logs\\{0}\\trainer'.format(os.environ['experiment_name'])

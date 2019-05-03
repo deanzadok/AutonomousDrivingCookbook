@@ -146,9 +146,9 @@ if __name__ == "__main__":
 
         # present fps or reward
         fps_sum += (1/(endTime-startTime))
-        #print("fps average: %.2f" % (fps_sum/i))
-        if i % 3 == 0:
-            print("reward: {}".format(reward))
+        print("fps average: %.2f" % (fps_sum/i))
+        #if i % 3 == 0:
+        #    print("reward: {}".format(reward))
 
         i+=1
         
