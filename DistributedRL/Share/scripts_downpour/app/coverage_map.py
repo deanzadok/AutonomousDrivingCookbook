@@ -19,6 +19,7 @@ class CoverageMap:
         self.input_size = input_size # final input size to be in the shape of [input_size, input_size], in centimeters
         self.height_threshold = height_threshold # height_threshold, in meters
         self.saved_state = None # save state in each iteration
+        self.saved_reward = 0 # save reward in each iteration
         self.reward_norm = reward_norm # factor to normalize the reward
 
         # prepare clean coverage map
@@ -28,6 +29,7 @@ class CoverageMap:
     def reset(self):
 
         self.saved_state = None
+        self.saved_reward = 0
         self.cov_map = np.zeros((int(self.map_size / self.scale_ratio), int(self.map_size / self.scale_ratio)))
 
     # set airsim client, to get position, orientation and lidar data
@@ -66,7 +68,7 @@ class CoverageMap:
         lidarData = self.client.getLidarData(lidar_name='LidarSensor1', vehicle_name='Car')
         if (len(lidarData.point_cloud) < 3):
             print("\tNo points received from Lidar data")
-            return self.saved_state
+            return self.saved_state, self.saved_reward
         else:
             # reshape array of floats to array of [X,Y,Z]
             points = np.array(lidarData.point_cloud, dtype=np.dtype('f4'))
@@ -112,8 +114,10 @@ class CoverageMap:
             self.saved_state = state[int(state.shape[0]/2 - state.shape[0]/4):int(state.shape[0]/2 + state.shape[0]/4), 
                             int(state.shape[1]/2 - state.shape[1]/4):int(state.shape[1]/2 + state.shape[1]/4)]
             
-            # send state as input and reward
-            return self.saved_state, min(new_pixels / self.reward_norm, 1.0)
+            # compute reward
+            self.saved_reward = min(new_pixels / self.reward_norm, 1.0)
+
+            return self.saved_state, self.saved_reward
 
 
 
