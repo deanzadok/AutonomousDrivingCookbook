@@ -256,7 +256,7 @@ class DistributedAgent():
         # For now, save 4 images at 0.01 second intervals.
         state_buffer_len = 4
         state_buffer = []
-        wait_delta_sec = 0.01
+        wait_delta_sec = 0.025
 
         print('Getting Pose')
         self.__car_client.simSetVehiclePose(airsim.Pose(airsim.Vector3r(starting_points[0], starting_points[1], starting_points[2]), toQuaternion(starting_direction[0], starting_direction[1], starting_direction[2])), True)
@@ -338,14 +338,21 @@ class DistributedAgent():
                 # Convert the selected state to a control signal
                 next_steering, is_reverse, next_brake = self.__model.state_to_control_signals(next_state, self.__car_client.getCarState())
 
+                # penalty acquired from changing driving direction
+                drive_change_penalty = False 
+
                 # Take the action
                 self.__car_controls.steering = next_steering
                 self.__car_controls.brake = next_brake
                 if is_reverse:
+                    if self.__car_controls.throttle == 0.4:
+                        drive_change_penalty = True
                     self.__car_controls.throttle = -0.4
                     self.__car_controls.is_manual_gear = True
                     self.__car_controls.manual_gear = -1
                 else:
+                    if self.__car_controls.throttle == -0.4:
+                        drive_change_penalty = True
                     self.__car_controls.throttle = 0.4
                     self.__car_controls.is_manual_gear = False
                     self.__car_controls.manual_gear = 0
@@ -360,7 +367,7 @@ class DistributedAgent():
                 state_buffer = self.__append_to_ring_buffer(post_cov_image, state_buffer, state_buffer_len)
                 car_state = self.__car_client.getCarState()
                 collision_info = self.__car_client.simGetCollisionInfo()
-                reward = self.__compute_reward(collision_info, car_state, cov_reward)
+                reward = self.__compute_reward(collision_info, car_state, cov_reward, drive_change_penalty)
                 
                 # Add the experience to the set of examples from this iteration
                 pre_states.append(pre_state)
@@ -516,7 +523,10 @@ class DistributedAgent():
         return image_rgba[76:135,0:255,0:3].astype(float)
 
     # Computes the reward functinon based on collision.
-    def __compute_reward(self, collision_info, car_state, cov_reward):
+    def __compute_reward(self, collision_info, car_state, cov_reward, drive_change_penalty):
+
+        MAX_SPEED = 2.5
+        alpha = 0.5
 
         # If the car has collided, the reward is always zero
         if (collision_info.has_collided):
@@ -526,7 +536,14 @@ class DistributedAgent():
         if abs(car_state.speed) < 0.02:
             return 0.0
 
-        return cov_reward
+        speed_reward = max(min(car_state.speed / MAX_SPEED, 1.0), 0.0)
+        reward = alpha * cov_reward + (1 - alpha) * speed_reward
+
+        # give penalty
+        #if drive_change_penalty:
+        #    reward = max(cov_reward - 0.25, 0)
+
+        return reward
 
     # get most newly generated random point
     def __get_next_generated_random_point(self):
