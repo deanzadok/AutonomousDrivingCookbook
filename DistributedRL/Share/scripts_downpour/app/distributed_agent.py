@@ -526,7 +526,7 @@ class DistributedAgent():
     def __compute_reward(self, collision_info, car_state, cov_reward, drive_change_penalty):
 
         MAX_SPEED = 2.5
-        alpha = 0.5
+        alpha = 0.35
 
         # If the car has collided, the reward is always zero
         if (collision_info.has_collided):
@@ -536,8 +536,16 @@ class DistributedAgent():
         if abs(car_state.speed) < 0.02:
             return 0.0
 
-        speed_reward = max(min(car_state.speed / MAX_SPEED, 1.0), 0.0)
-        reward = alpha * cov_reward + (1 - alpha) * speed_reward
+        speed_reward = max(min(car_state.speed / MAX_SPEED, 1.0), -1.0)
+
+        # If there is no new coverage, reward only on reversing:
+        if cov_reward < 0.1:
+            if car_state.speed < 0:
+                reward = -1 * speed_reward
+            else:
+                reward = 0
+        else: # there is coverage
+            reward = alpha * cov_reward + (1 - alpha) * speed_reward
 
         # give penalty
         #if drive_change_penalty:

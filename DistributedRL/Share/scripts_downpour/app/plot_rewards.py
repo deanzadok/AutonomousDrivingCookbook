@@ -19,6 +19,8 @@ means = []
 for i in range(0, current_df.shape[0] - 1): 
     sums.append(float(current_df.iloc[i][['Sum']]))
     means.append(float(current_df.iloc[i][['Mean']]))
+    if i % 5000 == 0:
+        print("processing {}/{} values".format(i, current_df.shape[0]))
 
 # x values for both graphs
 x_values = np.arange(0.0, current_df.shape[0] - 1, 1/args.density)

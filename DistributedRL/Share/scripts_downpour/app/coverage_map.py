@@ -10,7 +10,7 @@ import copy
 class CoverageMap:
 
     # initiate coverage map
-    def __init__(self, start_point, map_size, scale_ratio, state_size, input_size, height_threshold, reward_norm):
+    def __init__(self, start_point, map_size, scale_ratio, state_size, input_size, height_threshold, reward_norm, reward_count=5):
 
         self.start_point = start_point # agent's starting point from the simulation, in centimeters
         self.map_size = map_size # map size to be in the shape of [map_size, map_size], in centimeters
@@ -18,19 +18,21 @@ class CoverageMap:
         self.state_size = int(state_size / self.scale_ratio) # state size to be in the shape of [state_size, state_size], in centimeters
         self.input_size = input_size # final input size to be in the shape of [input_size, input_size], in centimeters
         self.height_threshold = height_threshold # height_threshold, in meters
-        self.saved_state = None # save state in each iteration
+        self.saved_state = np.zeros((self.input_size, self.input_size)) # save state in each iteration
         self.saved_reward = 0 # save reward in each iteration
         self.reward_norm = reward_norm # factor to normalize the reward
-
+        self.reward_count = reward_count
+        self.reward_list = [0.0] * self.reward_count
         # prepare clean coverage map
         self.cov_map = np.zeros((int(self.map_size / self.scale_ratio), int(self.map_size / self.scale_ratio)))
 
     # clear coverage map and state
     def reset(self):
 
-        self.saved_state = None
+        self.saved_state = np.zeros((self.input_size, self.input_size))
         self.saved_reward = 0
         self.cov_map = np.zeros((int(self.map_size / self.scale_ratio), int(self.map_size / self.scale_ratio)))
+        self.reward_list = [0.0] * self.reward_count
 
     # set airsim client, to get position, orientation and lidar data
     def set_client(self, client):
@@ -116,8 +118,10 @@ class CoverageMap:
             
             # compute reward
             self.saved_reward = min(new_pixels / self.reward_norm, 1.0)
+            self.reward_list.append(self.saved_reward)
+            del self.reward_list[0]
 
-            return self.saved_state, self.saved_reward
+            return self.saved_state, sum(self.reward_list) / len(self.reward_list)
 
 
 
