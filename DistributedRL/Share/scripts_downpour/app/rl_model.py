@@ -7,7 +7,7 @@ import os
 import tensorflow as tf
 from keras.preprocessing.image import ImageDataGenerator
 from keras.models import Sequential, Model, clone_model, load_model
-from keras.layers import Conv2D, MaxPooling2D, Dropout, Flatten, Dense, Lambda, Input, concatenate
+from keras.layers import Conv2D, MaxPooling2D, Dropout, Flatten, Dense, Lambda, Input, concatenate, GRU
 from keras.layers.normalization import BatchNormalization
 from keras.layers.advanced_activations import ELU
 from keras.optimizers import Adam, SGD, Adamax, Nadam, Adagrad, Adadelta, RMSprop
@@ -42,23 +42,33 @@ class RlModel():
 
         activation = 'relu'
         #pic_input = Input(shape=(59,255,3))
-        pic_input = Input(shape=(84,84,4))
+        pic_input = Input(shape=(84,84,3))
+        rgb_input = Input(shape=(84,84,3))
 
-
-        # convolution stack
-        img_stack = Conv2D(32, 8, strides=(4, 4), name='convolution0', padding='valid', activation=activation, trainable=train_conv_layers)(pic_input)
-        img_stack = Conv2D(64, 4, strides=(2, 2), name='convolution1', padding='valid', activation=activation, trainable=train_conv_layers)(img_stack)
-        img_stack = Conv2D(64, 3, strides=(1, 1), name='convolution2', padding='valid', activation=activation, trainable=train_conv_layers)(img_stack)
+        # first convolution stack
+        img_stack = Conv2D(32, 8, strides=(4, 4), name='convolution_a0', padding='valid', activation=activation, trainable=train_conv_layers)(pic_input)
+        img_stack = Conv2D(64, 4, strides=(2, 2), name='convolution_a1', padding='valid', activation=activation, trainable=train_conv_layers)(img_stack)
+        img_stack = Conv2D(64, 3, strides=(1, 1), name='convolution_a2', padding='valid', activation=activation, trainable=train_conv_layers)(img_stack)
         # flatten
         img_stack = Flatten()(img_stack)
+
+        # second convolution stack
+        rgb_stack = Conv2D(32, 8, strides=(4, 4), name='convolution_b0', padding='valid', activation=activation, trainable=train_conv_layers)(rgb_input)
+        rgb_stack = Conv2D(64, 4, strides=(2, 2), name='convolution_b1', padding='valid', activation=activation, trainable=train_conv_layers)(rgb_stack)
+        rgb_stack = Conv2D(64, 3, strides=(1, 1), name='convolution_b2', padding='valid', activation=activation, trainable=train_conv_layers)(rgb_stack)
+        # flatten
+        rgb_stack = Flatten()(rgb_stack)
+
         #img_stack = Dropout(0.2)(img_stack)
         # Fully connected layers
-        img_stack = Dense(512, name='rl_dense', activation=activation, kernel_initializer=random_normal(stddev=0.01))(img_stack)
-        output = Dense(len(self.__actions), name='rl_output', kernel_initializer=random_normal(stddev=0.01))(img_stack)
+        merged_stack = concatenate([img_stack, rgb_stack])
+        #merged_stack = GRU(units=1024, activation=activation)(merged_stack)
+        merged_stack = Dense(512, name='rl_dense', activation=activation, kernel_initializer=random_normal(stddev=0.01))(merged_stack)
+        output = Dense(len(self.__actions), name='rl_output', kernel_initializer=random_normal(stddev=0.01))(merged_stack)
 
         #opt = Adam()
         opt = RMSprop()
-        self.__action_model = Model(inputs=[pic_input], outputs=output)
+        self.__action_model = Model(inputs=[pic_input, rgb_input], outputs=output)
 
         self.__action_model.compile(optimizer=opt, loss='mean_squared_error')
         self.__action_model.summary()

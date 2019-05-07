@@ -82,7 +82,7 @@ class DistributedAgent():
         self.__log_file = parameters['log_path']
 
         # initiate coverage map
-        self.__coverage_map = CoverageMap(start_point=self.__start_point, map_size=12000, scale_ratio=1, state_size=2000, input_size=84, height_threshold=0.95, reward_norm=1000.0)
+        self.__coverage_map = CoverageMap(start_point=self.__start_point, map_size=12000, scale_ratio=1, state_size=4000, input_size=84, height_threshold=0.95, reward_norm=2000.0)
 
         # create txt file
         if not os.path.isdir(os.path.join(self.__data_dir,'\\checkpoint',self.__experiment_name)):
@@ -286,7 +286,9 @@ class DistributedAgent():
         while(datetime.datetime.now() < stop_run_time):
             time.sleep(wait_delta_sec)
             cov_image, _ = self.__get_cov_image()
-            state_buffer = self.__append_to_ring_buffer(cov_image, state_buffer, state_buffer_len)
+            rgb_image = self.__get_image()
+            image_set = [cov_image, rgb_image]
+            state_buffer = self.__append_to_ring_buffer(image_set, state_buffer, state_buffer_len)
         done = False
         actions = [] #records the state we go to
         pre_states = []
@@ -364,7 +366,9 @@ class DistributedAgent():
 
                 # Observe outcome and compute reward from action
                 post_cov_image, cov_reward = self.__get_cov_image()
-                state_buffer = self.__append_to_ring_buffer(post_cov_image, state_buffer, state_buffer_len)
+                post_rgb_image = self.__get_image()
+                post_image_set = [post_cov_image, post_rgb_image]
+                state_buffer = self.__append_to_ring_buffer(post_image_set, state_buffer, state_buffer_len)
                 car_state = self.__car_client.getCarState()
                 collision_info = self.__car_client.simGetCollisionInfo()
                 reward = self.__compute_reward(collision_info, car_state, cov_reward, drive_change_penalty)
@@ -516,17 +520,20 @@ class DistributedAgent():
 
     # Gets an image from AirSim
     def __get_image(self):
-        image_response = self.__car_client.simGetImages([airsim.ImageRequest(0, airsim.ImageType.Scene, False, False)])[0]
+        image_response = self.__car_client.simGetImages([airsim.ImageRequest("RCCamera", airsim.ImageType.Scene, False, False)])[0]
         image1d = np.fromstring(image_response.image_data_uint8, dtype=np.uint8)
         image_rgba = image1d.reshape(image_response.height, image_response.width, 4)
 
-        return image_rgba[76:135,0:255,0:3].astype(float)
+        im = PIL.Image.fromarray(np.uint8(image_rgba))
+        im.save("DistributedRL\\debug\\{}.png".format(time.time()))
+
+        return image_rgba[60:144,86:170,0:3].astype(float)
 
     # Computes the reward functinon based on collision.
     def __compute_reward(self, collision_info, car_state, cov_reward, drive_change_penalty):
 
         MAX_SPEED = 2.5
-        alpha = 0.35
+        alpha = 1.0
 
         # If the car has collided, the reward is always zero
         if (collision_info.has_collided):

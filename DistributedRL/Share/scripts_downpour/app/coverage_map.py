@@ -42,13 +42,19 @@ class CoverageMap:
     # get the entire map, rescaled to the input size
     def get_map_scaled(self):
 
-        # TODO: resize without PIL
+        # manual resize
+        #binary_map = np.zeros((self.input_size, self.input_size))
+        #step_size = int(self.map_size / self.input_size)
+        #for i in range(self.input_size):
+        #    for j in range(self.input_size):
+        #        binary_map[i,j] = self.cov_map[i*step_size:(i+1)*step_size,j*step_size:(j+1)*step_size].mean()
+
         # resize coverage image using PIL
         im = Image.fromarray(np.uint8(self.cov_map))
         im = im.resize((self.input_size,self.input_size), Image.BILINEAR)
+        binary_map = np.array(im)
 
         # make it binary
-        binary_map = np.array(im)
         idxs = np.where(binary_map > 0.0)
         binary_map[idxs] = 255.0
 
@@ -91,7 +97,12 @@ class CoverageMap:
             points_trimmed[:,0] = np.subtract(pose[0],np.rint(points_trimmed[:,0] * 100.0 / self.scale_ratio))
             points_trimmed[:,1] = np.add(pose[1],np.rint(points_trimmed[:,1] * 100.0 / self.scale_ratio))
             points_trimmed = points_trimmed.astype(int)
-            
+
+            # randomly remove lidar points
+            #max_points = points_trimmed.shape[0]-10
+            #rejected_idxs = np.random.permutation(points_trimmed.shape[0])[:max_points]
+            #points_trimmed = np.delete(points_trimmed, rejected_idxs, axis=0)
+
             # paint selected indexes, and sum new pixels
             new_pixels = 0
             for i in range(points_trimmed.shape[0]):
@@ -103,7 +114,7 @@ class CoverageMap:
             x_range = (int(pose[0] - self.state_size/2), int(pose[0] + self.state_size/2))
             y_range = (int(pose[1] - self.state_size/2), int(pose[1] + self.state_size/2))
             state = self.cov_map[x_range[0]:x_range[1],y_range[0]:y_range[1]]
-
+            
             # scale using PIL
             im = Image.fromarray(np.uint8(state))
             im = im.resize((self.input_size*2, self.input_size*2), Image.ANTIALIAS)
@@ -111,7 +122,7 @@ class CoverageMap:
             # rotate according to the orientation
             im = im.rotate(math.degrees(angles[2]))
             state = np.array(im)
-
+            
             # extract half of the portion to receive state in input size, save it for backup
             self.saved_state = state[int(state.shape[0]/2 - state.shape[0]/4):int(state.shape[0]/2 + state.shape[0]/4), 
                             int(state.shape[1]/2 - state.shape[1]/4):int(state.shape[1]/2 + state.shape[1]/4)]
@@ -133,7 +144,7 @@ if __name__ == "__main__":
 
     # create coverage map and connect to client
     start_point = [500.0, 850.0, 32.0]
-    covMap = CoverageMap(start_point=start_point, map_size=12000, scale_ratio=1, state_size=2000, input_size=84, height_threshold=0.95, reward_norm=1000.0)
+    covMap = CoverageMap(start_point=start_point, map_size=12000, scale_ratio=1, state_size=2000, input_size=84, height_threshold=0.9, reward_norm=2000.0)
     covMap.set_client(client=client)
 
     # start free run session
@@ -154,9 +165,9 @@ if __name__ == "__main__":
 
         # present fps or reward
         fps_sum += (1/(endTime-startTime))
-        print("fps average: %.2f" % (fps_sum/i))
-        #if i % 3 == 0:
-        #    print("reward: {}".format(reward))
+        #print("fps average: %.2f" % (fps_sum/i))
+        if i % 3 == 0:
+            print("reward: {}".format(reward))
 
         i+=1
         
