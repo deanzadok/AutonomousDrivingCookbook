@@ -1,1 +1,1 @@
-net use Z: \\explorationrlsa.file.core.windows.net\share /u:AZURE\explorationrlsa e8SKhxauER4Ju1oJidJsa14lsVOTs0b+Wyw+XGLpWHQD8DxZaC7N/L/NxKZm0w/1Gq0369HbHSZ2nLJzXZrgdg==
+net use Z: \\explorationrlsa.file.core.windows.net\share /u:AZURE\explorationrlsa ILhaqToi643uIGjuMwrkh0seyYLeEFzUImj7vO5hxN8/d+UqJscLImUcf9poTARA9/+G5T+HXlRcqIs+LjbNgA==
