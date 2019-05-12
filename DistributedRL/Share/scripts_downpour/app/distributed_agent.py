@@ -20,11 +20,12 @@ import copy
 import datetime
 from coverage_map import CoverageMap
 import errno
+from random import randint
 
 # A class that represents the agent that will drive the vehicle, train the model, and send the gradient updates to the trainer.
 class DistributedAgent():
     def __init__(self, parameters):
-        required_parameters = ['data_dir', 'max_epoch_runtime_sec', 'replay_memory_size', 'batch_size', 'min_epsilon', 'per_iter_epsilon_reduction', 'experiment_name', 'train_conv_layers', 'start_x', 'start_y', 'start_z', 'log_path']
+        required_parameters = ['data_dir', 'max_epoch_runtime_sec', 'replay_memory_size', 'batch_size', 'min_epsilon', 'per_iter_epsilon_reduction', 'experiment_name', 'train_conv_layers', 'exp_type', 'start_x', 'start_y', 'start_z', 'log_path']
         for required_parameter in required_parameters:
             if required_parameter not in parameters:
                 raise ValueError('Missing required parameter {0}'.format(required_parameter))
@@ -80,6 +81,7 @@ class DistributedAgent():
 
         self.__start_point = [float(parameters['start_x']), float(parameters['start_y']), float(parameters['start_z'])]
         self.__log_file = parameters['log_path']
+        self.__exp_type = parameters['exp_type']
 
         # initiate coverage map
         self.__coverage_map = CoverageMap(start_point=self.__start_point, map_size=12000, scale_ratio=1, state_size=4000, input_size=84, height_threshold=0.95, reward_norm=2000.0)
@@ -91,7 +93,9 @@ class DistributedAgent():
         self.__rewards_log.write("Timestamp\tSum\tMean\n")
         self.__rewards_log.close()
 
-
+        # create starting points list
+        #self.__starting_points = self.__get_starting_points()
+        self.__starting_points = [[500.0, 850.0, 32.0]]
     # Starts the agent
     def start(self):
         self.__run_function()
@@ -137,12 +141,18 @@ class DistributedAgent():
             # Get the latest model from the trainer
             print('Getting model from the trainer')
             sys.stdout.flush()
-            self.__model = RlModel(self.__weights_path, self.__train_conv_layers)
+            buffer_len = 4
+            if self.__exp_type == 'with_rgb':
+                buffer_len = 3
+            self.__model = RlModel(weights_path=self.__weights_path, train_conv_layers=self.__train_conv_layers, exp_type=self.__exp_type, buffer_len=buffer_len)
             self.__get_latest_model()
         
         else:
             print('Run is local. Skipping connection to trainer.')
-            self.__model = RlModel(self.__weights_path, self.__train_conv_layers)
+            buffer_len = 4
+            if self.__exp_type == 'with_rgb':
+                buffer_len = 3
+            self.__model = RlModel(weights_path=self.__weights_path, train_conv_layers=self.__train_conv_layers, exp_type=self.__exp_type, buffer_len=buffer_len)
             
         # Connect to the AirSim exe
         self.__connect_to_airsim()
@@ -235,11 +245,13 @@ class DistributedAgent():
 
     # Appends a sample to a ring buffer.
     # If the appended example takes the size of the buffer over buffer_size, the example at the front will be removed.
-    def __append_to_ring_buffer(self, item, buffer, buffer_size):
+    def __append_to_ring_buffer(self, item, rgb_item, buffer, rgb_buffer, buffer_size):
         if (len(buffer) >= buffer_size):
             buffer = buffer[1:]
+            rgb_buffer = rgb_buffer[1:]
         buffer.append(item)
-        return buffer
+        rgb_buffer.append(rgb_item)
+        return buffer, rgb_buffer
     
     # Runs an interation of data generation from AirSim.
     # Data will be saved in the replay memory.
@@ -255,7 +267,10 @@ class DistributedAgent():
         # Initialize the state buffer.
         # For now, save 4 images at 0.01 second intervals.
         state_buffer_len = 4
+        if self.__exp_type == 'with_rgb':
+            state_buffer_len = 3
         state_buffer = []
+        rgb_buffer = []
         wait_delta_sec = 0.025
 
         print('Getting Pose')
@@ -277,7 +292,7 @@ class DistributedAgent():
         #Start the car rolling so it doesn't get stuck
         print('Running car for a few seconds...')
         self.__car_controls.steering = 0
-        self.__car_controls.throttle = 0.5
+        self.__car_controls.throttle = 0.4
         self.__car_controls.brake = 0
         self.__car_client.setCarControls(self.__car_controls)
         
@@ -286,19 +301,23 @@ class DistributedAgent():
         while(datetime.datetime.now() < stop_run_time):
             time.sleep(wait_delta_sec)
             cov_image, _ = self.__get_cov_image()
-            rgb_image = self.__get_image()
-            image_set = [cov_image, rgb_image]
-            state_buffer = self.__append_to_ring_buffer(image_set, state_buffer, state_buffer_len)
+            rgb_image = None
+            if self.__exp_type == 'with_rgb':
+                rgb_image = self.__get_image()
+            state_buffer, rgb_buffer = self.__append_to_ring_buffer(cov_image, rgb_image, state_buffer, rgb_buffer, state_buffer_len)
         done = False
         actions = [] #records the state we go to
         pre_states = []
         post_states = []
+        if self.__exp_type == 'with_rgb':
+            pre_rgbs = []
+            post_rgbs = []
         rewards = []
         predicted_rewards = []
         car_state = self.__car_client.getCarState()
 
         # slow down a bit
-        self.__car_controls.throttle = 0.4
+        self.__car_controls.throttle = 0.3
         self.__car_client.setCarControls(self.__car_controls)
 
         start_time = datetime.datetime.utcnow()
@@ -328,13 +347,18 @@ class DistributedAgent():
                 # The Agent should occasionally pick random action instead of best action
                 do_greedy = np.random.random_sample()
                 pre_state = copy.deepcopy(state_buffer)
+                if self.__exp_type == 'with_rgb':
+                    pre_rgb = copy.deepcopy(rgb_buffer)
+                else:
+                    pre_rgb = None
                 if (do_greedy < self.__epsilon or always_random):
                     num_random += 1
                     next_state = self.__model.get_random_state()
                     predicted_reward = 0
                     
                 else:
-                    next_state, predicted_reward = self.__model.predict_state(pre_state)
+                    next_state, predicted_reward, _ = self.__model.predict_state(pre_state,pre_rgb)
+
                     print('Model predicts {0}'.format(next_state))
 
                 # Convert the selected state to a control signal
@@ -347,15 +371,15 @@ class DistributedAgent():
                 self.__car_controls.steering = next_steering
                 self.__car_controls.brake = next_brake
                 if is_reverse:
-                    if self.__car_controls.throttle == 0.4:
+                    if self.__car_controls.throttle == 0.3:
                         drive_change_penalty = True
-                    self.__car_controls.throttle = -0.4
+                    self.__car_controls.throttle = -0.3
                     self.__car_controls.is_manual_gear = True
                     self.__car_controls.manual_gear = -1
                 else:
-                    if self.__car_controls.throttle == -0.4:
+                    if self.__car_controls.throttle == -0.3:
                         drive_change_penalty = True
-                    self.__car_controls.throttle = 0.4
+                    self.__car_controls.throttle = 0.3
                     self.__car_controls.is_manual_gear = False
                     self.__car_controls.manual_gear = 0
 
@@ -366,9 +390,12 @@ class DistributedAgent():
 
                 # Observe outcome and compute reward from action
                 post_cov_image, cov_reward = self.__get_cov_image()
-                post_rgb_image = self.__get_image()
-                post_image_set = [post_cov_image, post_rgb_image]
-                state_buffer = self.__append_to_ring_buffer(post_image_set, state_buffer, state_buffer_len)
+                if self.__exp_type == 'with_rgb':
+                    post_rgb_image = self.__get_image()
+                else:
+                    post_rgb_image = None
+
+                state_buffer, rgb_buffer = self.__append_to_ring_buffer(post_cov_image, post_rgb_image, state_buffer, rgb_buffer, state_buffer_len)
                 car_state = self.__car_client.getCarState()
                 collision_info = self.__car_client.simGetCollisionInfo()
                 reward = self.__compute_reward(collision_info, car_state, cov_reward, drive_change_penalty)
@@ -376,6 +403,9 @@ class DistributedAgent():
                 # Add the experience to the set of examples from this iteration
                 pre_states.append(pre_state)
                 post_states.append(state_buffer)
+                if self.__exp_type == 'with_rgb':
+                    pre_rgbs.append(pre_rgb)
+                    post_rgbs.append(rgb_buffer)
                 rewards.append(reward)
                 predicted_rewards.append(predicted_reward)
                 actions.append(next_state)
@@ -387,6 +417,9 @@ class DistributedAgent():
         # Add all of the states from this iteration to the replay memory
         self.__add_to_replay_memory('pre_states', pre_states)
         self.__add_to_replay_memory('post_states', post_states)
+        if self.__exp_type == 'with_rgb':
+            self.__add_to_replay_memory('pre_rgbs', pre_rgbs)
+            self.__add_to_replay_memory('post_rgbs', post_rgbs)
         self.__add_to_replay_memory('actions', actions)
         self.__add_to_replay_memory('rewards', rewards)
         self.__add_to_replay_memory('predicted_rewards', predicted_rewards)
@@ -417,6 +450,9 @@ class DistributedAgent():
         sampled_experiences = {}
         sampled_experiences['pre_states'] = []
         sampled_experiences['post_states'] = []
+        if self.__exp_type == 'with_rgb':
+            sampled_experiences['pre_rgbs'] = []
+            sampled_experiences['post_rgbs'] = []
         sampled_experiences['actions'] = []
         sampled_experiences['rewards'] = []
         sampled_experiences['predicted_rewards'] = []
@@ -437,6 +473,9 @@ class DistributedAgent():
         
             sampled_experiences['pre_states'] += [experiences['pre_states'][i] for i in idx_set]
             sampled_experiences['post_states'] += [experiences['post_states'][i] for i in idx_set]
+            if self.__exp_type == 'with_rgb':
+                sampled_experiences['pre_rgbs'] += [experiences['pre_rgbs'][i] for i in idx_set]
+                sampled_experiences['post_rgbs'] += [experiences['post_rgbs'][i] for i in idx_set]
             sampled_experiences['actions'] += [experiences['actions'][i] for i in idx_set]
             sampled_experiences['rewards'] += [experiences['rewards'][i] for i in idx_set]
             sampled_experiences['predicted_rewards'] += [experiences['predicted_rewards'][i] for i in idx_set]
@@ -522,12 +561,17 @@ class DistributedAgent():
     def __get_image(self):
         image_response = self.__car_client.simGetImages([airsim.ImageRequest("RCCamera", airsim.ImageType.Scene, False, False)])[0]
         image1d = np.fromstring(image_response.image_data_uint8, dtype=np.uint8)
-        image_rgba = image1d.reshape(image_response.height, image_response.width, 4)
+        if image1d.size > 1:
+            image_rgba = image1d.reshape(image_response.height, image_response.width, 4)
 
-        im = PIL.Image.fromarray(np.uint8(image_rgba))
-        im.save("DistributedRL\\debug\\{}.png".format(time.time()))
+            #im = PIL.Image.fromarray(np.uint8(image_rgba))
+            #im.save("DistributedRL\\debug\\{}.png".format(time.time()))
 
-        return image_rgba[60:144,86:170,0:3].astype(float)
+            image_rgba = image_rgba / 255.0
+
+            return image_rgba[60:144,86:170,0:3].astype(float)
+        
+        return np.zeros((84,84,3)).astype(float)
 
     # Computes the reward functinon based on collision.
     def __compute_reward(self, collision_info, car_state, cov_reward, drive_change_penalty):
@@ -560,6 +604,17 @@ class DistributedAgent():
 
         return reward
 
+    # prepare starting points list
+    def __get_starting_points(self):
+        
+        starting_points_file = open(os.path.join(self.__data_dir,'data\\starting_points.txt'))
+        starting_points_list = []
+        
+        for line in starting_points_file:
+            starting_points_list.append([float(x) for x in line.split(' ')[:3]])
+        
+        return starting_points_list
+
     # get most newly generated random point
     def __get_next_generated_random_point(self):
         """
@@ -586,8 +641,9 @@ class DistributedAgent():
         # filter random point from line
         random_point = [float(newest_rp.split(" ")[-3].split("=")[1]), float(newest_rp.split(" ")[-2].split("=")[1]), float(newest_rp.split(" ")[-1].split("=")[1])]
         """
-        random_point = [500.0, 850.0, 32.0]
-        return random_point
+
+        idx = randint(0, len(self.__starting_points)-1)
+        return self.__starting_points[idx]
 
     # Randomly selects a starting point on the road
     # Used for initializing an iteration of data generation from AirSim
@@ -661,6 +717,7 @@ for arg in sys.argv:
 #np.set_printoptions(threshold=np.nan, suppress=True)
 
 # Manually add parameters
+"""
 if 'batch_update_frequency' not in parameters.keys(): 
     parameters['batch_update_frequency'] = 300
 if 'max_epoch_runtime_sec' not in parameters.keys(): 
@@ -672,7 +729,7 @@ if 'min_epsilon' not in parameters.keys():
 if 'batch_size' not in parameters.keys(): 
     parameters['batch_size'] = 32
 if 'replay_memory_size' not in parameters.keys(): 
-    parameters['replay_memory_size'] = 2000
+    parameters['replay_memory_size'] = 300
 if 'train_conv_layers' not in parameters.keys(): 
     parameters['train_conv_layers'] = 'false'
 if 'airsim_path' not in parameters.keys(): 
@@ -683,6 +740,9 @@ if 'experiment_name' not in parameters.keys():
     parameters['experiment_name'] = 'local_run'
 if 'local_run' not in parameters.keys(): 
     parameters['local_run'] = 'true'
+"""
+if 'exp_type' not in parameters.keys():
+    parameters['exp_type'] = 'regular'
 if 'start_x' not in parameters.keys(): 
     parameters['start_x'] = 500.0
 if 'start_y' not in parameters.keys(): 

@@ -144,7 +144,7 @@ if __name__ == "__main__":
 
     # create coverage map and connect to client
     start_point = [500.0, 850.0, 32.0]
-    covMap = CoverageMap(start_point=start_point, map_size=12000, scale_ratio=1, state_size=2000, input_size=84, height_threshold=0.9, reward_norm=2000.0)
+    covMap = CoverageMap(start_point=start_point, map_size=12000, scale_ratio=1, state_size=4000, input_size=84, height_threshold=0.9, reward_norm=2000.0)
     covMap.set_client(client=client)
 
     # start free run session
