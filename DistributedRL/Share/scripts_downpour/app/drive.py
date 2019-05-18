@@ -12,15 +12,13 @@ import os
 import PIL
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--path', '-path', help='model file path', default='C:\\Users\\t-dezado\\Desktop\\750171.json', type=str)
+parser.add_argument('--path', '-path', help='model file path', default='C:\\Users\\t-dezado\\Desktop\\4100290.json', type=str)
 parser.add_argument('--type', '-type', help='experiment type from [regular, with_rgb]', default='with_rgb', type=str)
 parser.add_argument('--state_size', '-state_size', help='the size of the state of the coverage map', default=4000, type=int)
-parser.add_argument('--reward_norm', '-reward_norm', help='factor to normalize the reward', default=2000.0, type=float)
+parser.add_argument('--reward_norm', '-reward_norm', help='factor to normalize the reward', default=2.0, type=float)
 args = parser.parse_args()
 
 buffer_len = 4
-if args.type == 'with_rgb':
-    buffer_len = 3
 
 model = RlModel(weights_path=None, train_conv_layers=False, exp_type=args.type, buffer_len=buffer_len)
 with open(args.path, 'r') as f:
@@ -28,8 +26,8 @@ with open(args.path, 'r') as f:
     model.from_packet(checkpoint_data['model'])
 
 # initiate coverage map
-start_point = [500.0, 850.0, 32.0]
-coverage_map = CoverageMap(start_point=start_point, map_size=12000, scale_ratio=1, state_size=args.state_size, input_size=84, height_threshold=0.95, reward_norm=args.reward_norm)
+start_point = [1150.0, -110.0, 32.0]
+coverage_map = CoverageMap(start_point=start_point, map_size=12000, scale_ratio=20, state_size=args.state_size, input_size=40, height_threshold=0.9, reward_norm=args.reward_norm)
 
 print('Connecting to AirSim...')
 car_client = airsim.CarClient()
@@ -51,6 +49,7 @@ def append_to_ring_buffer(item, rgb_item, buffer, rgb_buffer, buffer_size):
 def get_cov_image():
 
     state, reward = coverage_map.get_state()
+    state = coverage_map.get_map_scaled()
 
     # debug only
     #print(reward)
@@ -77,6 +76,33 @@ def get_image():
     
     return np.zeros((84,84,3)).astype(float)
 
+def get_depth_image():
+
+    responses = car_client.simGetImages([airsim.ImageRequest("RCCamera", airsim.ImageType.DepthPerspective, True, False)])
+    return transform_depth_input(responses)
+
+
+def transform_depth_input(responses):
+    img1d = np.array(responses[0].image_data_float, dtype=np.float)
+
+    if img1d.size > 1:
+
+        img1d = 255/np.maximum(np.ones(img1d.size), img1d)
+        img2d = np.reshape(img1d, (responses[0].height, responses[0].width))
+
+        image = PIL.Image.fromarray(img2d)
+
+        # debug only
+        #image_png = image.convert('RGB')
+        #image_png.save("DistributedRL\\debug\\{}.png".format(time.time()))
+
+        im_final = np.array(image.resize((84, 84)).convert('L')) 
+        im_final = im_final / 255.0
+
+        return im_final
+
+    return np.zeros((84,84)).astype(float)
+
 state_buffer = []
 rgb_buffer = []
 
@@ -91,7 +117,7 @@ while(datetime.datetime.now() < stop_run_time):
     cov_image = get_cov_image()
     rgb_image = None
     if args.type == 'with_rgb':
-        rgb_image = get_image()
+        rgb_image = get_depth_image()
     state_buffer, rgb_buffer = append_to_ring_buffer(cov_image, rgb_image, state_buffer, rgb_buffer, buffer_len)
 
 # slow down a bit
@@ -103,7 +129,7 @@ while(True):
     cov_image = get_cov_image()
     rgb_image = None
     if args.type == 'with_rgb':
-        rgb_image = get_image()
+        rgb_image = get_depth_image()
     state_buffer, rgb_buffer = append_to_ring_buffer(cov_image, rgb_image, state_buffer, rgb_buffer, buffer_len)
     next_state, dummy, qvalues = model.predict_state(state_buffer, rgb_buffer)
 

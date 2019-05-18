@@ -84,7 +84,7 @@ class DistributedAgent():
         self.__exp_type = parameters['exp_type']
 
         # initiate coverage map
-        self.__coverage_map = CoverageMap(start_point=self.__start_point, map_size=12000, scale_ratio=1, state_size=4000, input_size=84, height_threshold=0.95, reward_norm=2000.0)
+        self.__coverage_map = CoverageMap(start_point=self.__start_point, map_size=12000, scale_ratio=20, state_size=4000, input_size=40, height_threshold=0.9, reward_norm=2.0)
 
         # create txt file
         if not os.path.isdir(os.path.join(self.__data_dir,'\\checkpoint',self.__experiment_name)):
@@ -94,8 +94,8 @@ class DistributedAgent():
         self.__rewards_log.close()
 
         # create starting points list
-        #self.__starting_points = self.__get_starting_points()
-        self.__starting_points = [[500.0, 850.0, 32.0]]
+        self.__starting_points = self.__get_starting_points()
+        #self.__starting_points = [[500.0, 850.0, 32.0]]
     # Starts the agent
     def start(self):
         self.__run_function()
@@ -142,16 +142,12 @@ class DistributedAgent():
             print('Getting model from the trainer')
             sys.stdout.flush()
             buffer_len = 4
-            if self.__exp_type == 'with_rgb':
-                buffer_len = 3
             self.__model = RlModel(weights_path=self.__weights_path, train_conv_layers=self.__train_conv_layers, exp_type=self.__exp_type, buffer_len=buffer_len)
             self.__get_latest_model()
         
         else:
             print('Run is local. Skipping connection to trainer.')
             buffer_len = 4
-            if self.__exp_type == 'with_rgb':
-                buffer_len = 3
             self.__model = RlModel(weights_path=self.__weights_path, train_conv_layers=self.__train_conv_layers, exp_type=self.__exp_type, buffer_len=buffer_len)
             
         # Connect to the AirSim exe
@@ -162,12 +158,13 @@ class DistributedAgent():
         while True:
             print('Running Airsim Epoch.')
             try:
-                self.__run_airsim_epoch(True)
-                percent_full = 100.0 * len(self.__experiences['actions'])/self.__replay_memory_size
-                print('Replay memory now contains {0} members. ({1}% full)'.format(len(self.__experiences['actions']), percent_full))
+                _, num_of_actions = self.__run_airsim_epoch(True)
+                if num_of_actions > 0:
+                    percent_full = 100.0 * len(self.__experiences['actions'])/self.__replay_memory_size
+                    print('Replay memory now contains {0} members. ({1}% full)'.format(len(self.__experiences['actions']), percent_full))
 
-                if (percent_full >= 100.0):
-                    break
+                    if (percent_full >= 100.0):
+                        break
             except msgpackrpc.error.TimeoutError:
                 print('Lost connection to AirSim while filling replay memory. Attempting to reconnect.')
                 self.__connect_to_airsim()
@@ -267,8 +264,6 @@ class DistributedAgent():
         # Initialize the state buffer.
         # For now, save 4 images at 0.01 second intervals.
         state_buffer_len = 4
-        if self.__exp_type == 'with_rgb':
-            state_buffer_len = 3
         state_buffer = []
         rgb_buffer = []
         wait_delta_sec = 0.025
@@ -398,7 +393,7 @@ class DistributedAgent():
                 state_buffer, rgb_buffer = self.__append_to_ring_buffer(post_cov_image, post_rgb_image, state_buffer, rgb_buffer, state_buffer_len)
                 car_state = self.__car_client.getCarState()
                 collision_info = self.__car_client.simGetCollisionInfo()
-                reward = self.__compute_reward(collision_info, car_state, cov_reward, drive_change_penalty)
+                reward = self.__compute_reward(collision_info, car_state, cov_reward, next_state)
                 
                 # Add the experience to the set of examples from this iteration
                 pre_states.append(pre_state)
@@ -414,27 +409,32 @@ class DistributedAgent():
         is_not_terminal = [1 for i in range(0, len(actions)-1, 1)]
         is_not_terminal.append(0)
         
-        # Add all of the states from this iteration to the replay memory
-        self.__add_to_replay_memory('pre_states', pre_states)
-        self.__add_to_replay_memory('post_states', post_states)
-        if self.__exp_type == 'with_rgb':
-            self.__add_to_replay_memory('pre_rgbs', pre_rgbs)
-            self.__add_to_replay_memory('post_rgbs', post_rgbs)
-        self.__add_to_replay_memory('actions', actions)
-        self.__add_to_replay_memory('rewards', rewards)
-        self.__add_to_replay_memory('predicted_rewards', predicted_rewards)
-        self.__add_to_replay_memory('is_not_terminal', is_not_terminal)
+        # only add to the replay memory if have enough data
+        if len(actions) > 30:
+            # Add all of the states from this iteration to the replay memory
+            self.__add_to_replay_memory('pre_states', pre_states)
+            self.__add_to_replay_memory('post_states', post_states)
+            if self.__exp_type == 'with_rgb':
+                self.__add_to_replay_memory('pre_rgbs', pre_rgbs)
+                self.__add_to_replay_memory('post_rgbs', post_rgbs)
+            self.__add_to_replay_memory('actions', actions)
+            self.__add_to_replay_memory('rewards', rewards)
+            self.__add_to_replay_memory('predicted_rewards', predicted_rewards)
+            self.__add_to_replay_memory('is_not_terminal', is_not_terminal)
 
-        print('Percent random actions: {0}'.format(num_random / max(1, len(actions))))
-        print('Num total actions: {0}'.format(len(actions)))
-        
-        # If we are in the main loop, reduce the epsilon parameter so that the model will be called more often
-        # Note: this will be overwritten by the trainer's epsilon if running in distributed mode
-        if not always_random:
-            self.__epsilon -= self.__per_iter_epsilon_reduction
-            self.__epsilon = max(self.__epsilon, self.__min_epsilon)
-        
-        return self.__experiences, len(actions)
+            print('Percent random actions: {0}'.format(num_random / max(1, len(actions))))
+            print('Num total actions: {0}'.format(len(actions)))
+            
+            # If we are in the main loop, reduce the epsilon parameter so that the model will be called more often
+            # Note: this will be overwritten by the trainer's epsilon if running in distributed mode
+            if not always_random:
+                self.__epsilon -= self.__per_iter_epsilon_reduction
+                self.__epsilon = max(self.__epsilon, self.__min_epsilon)
+            
+            return self.__experiences, len(actions)
+        else:
+            return self.__experiences, 0
+            
 
     # Adds a set of examples to the replay memory
     def __add_to_replay_memory(self, field_name, data):
@@ -547,6 +547,7 @@ class DistributedAgent():
     def __get_cov_image(self):
 
         state, cov_reward = self.__coverage_map.get_state()
+        state = self.__coverage_map.get_map_scaled()
 
         # debug only
         #im = PIL.Image.fromarray(np.uint8(state))
@@ -559,6 +560,10 @@ class DistributedAgent():
 
     # Gets an image from AirSim
     def __get_image(self):
+
+        responses = self.__car_client.simGetImages([airsim.ImageRequest("RCCamera", airsim.ImageType.DepthPerspective, True, False)])
+        return transform_depth_input(responses)
+        """
         image_response = self.__car_client.simGetImages([airsim.ImageRequest("RCCamera", airsim.ImageType.Scene, False, False)])[0]
         image1d = np.fromstring(image_response.image_data_uint8, dtype=np.uint8)
         if image1d.size > 1:
@@ -572,9 +577,9 @@ class DistributedAgent():
             return image_rgba[60:144,86:170,0:3].astype(float)
         
         return np.zeros((84,84,3)).astype(float)
-
+        """
     # Computes the reward functinon based on collision.
-    def __compute_reward(self, collision_info, car_state, cov_reward, drive_change_penalty):
+    def __compute_reward(self, collision_info, car_state, cov_reward, action):
 
         MAX_SPEED = 2.5
         alpha = 1.0
@@ -587,21 +592,17 @@ class DistributedAgent():
         if abs(car_state.speed) < 0.02:
             return 0.0
 
-        speed_reward = max(min(car_state.speed / MAX_SPEED, 1.0), -1.0)
-
-        # If there is no new coverage, reward only on reversing:
+        # If there is no new coverage, there is no reward
         if cov_reward < 0.1:
-            if car_state.speed < 0:
-                reward = -1 * speed_reward
-            else:
-                reward = 0
-        else: # there is coverage
-            reward = alpha * cov_reward + (1 - alpha) * speed_reward
+                return 0.0 
 
-        # give penalty
-        #if drive_change_penalty:
-        #    reward = max(cov_reward - 0.25, 0)
+        # straight will be rewarded as 1.0, semi straight as 0.5
+        direction_reward = float(2 - abs(action - 2)) / 2.0
 
+        # final reward
+        reward = alpha * cov_reward + (1 - alpha) * direction_reward
+
+        #print("cov reward: {}, reward: {}".format(cov_reward, reward))
         return reward
 
     # prepare starting points list
@@ -617,7 +618,7 @@ class DistributedAgent():
 
     # get most newly generated random point
     def __get_next_generated_random_point(self):
-        """
+        
         # grab the newest line with generated random point
         newest_rp = "None"
 
@@ -640,10 +641,10 @@ class DistributedAgent():
         
         # filter random point from line
         random_point = [float(newest_rp.split(" ")[-3].split("=")[1]), float(newest_rp.split(" ")[-2].split("=")[1]), float(newest_rp.split(" ")[-1].split("=")[1])]
-        """
+        return random_point
 
-        idx = randint(0, len(self.__starting_points)-1)
-        return self.__starting_points[idx]
+        #idx = randint(0, len(self.__starting_points)-1)
+        #return self.__starting_points[idx]
 
     # Randomly selects a starting point on the road
     # Used for initializing an iteration of data generation from AirSim
@@ -688,6 +689,28 @@ def toQuaternion(pitch, roll, yaw):
     q.y_val = t0 * t2 * t5 + t1 * t3 * t4 #y
     q.z_val = t1 * t2 * t4 - t0 * t3 * t5 #z
     return q
+
+def transform_depth_input(responses):
+    img1d = np.array(responses[0].image_data_float, dtype=np.float)
+
+    if img1d.size > 1:
+
+        img1d = 255/np.maximum(np.ones(img1d.size), img1d)
+        img2d = np.reshape(img1d, (responses[0].height, responses[0].width))
+
+        image = PIL.Image.fromarray(img2d)
+
+        # debug only
+        #image_png = image.convert('RGB')
+        #image_png.save("DistributedRL\\debug\\{}.png".format(time.time()))
+
+        im_final = np.array(image.resize((84, 84)).convert('L')) 
+        im_final = im_final / 255.0
+
+        return im_final
+
+    return np.zeros((84,84)).astype(float)
+
 
 # Sets up the logging framework.
 # This allows us to log using simple print() statements.
@@ -738,11 +761,13 @@ if 'data_dir' not in parameters.keys():
     parameters['data_dir'] = os.path.join(os.getcwd(), 'DistributedRL\\Share')
 if 'experiment_name' not in parameters.keys(): 
     parameters['experiment_name'] = 'local_run'
+if 'log_path' not in parameters.keys(): 
+    parameters['log_path'] = "..\\..\\Unreal Projects\\Building99\\Saved\\Logs\\Building_99.log"
 if 'local_run' not in parameters.keys(): 
     parameters['local_run'] = 'true'
 """
 if 'exp_type' not in parameters.keys():
-    parameters['exp_type'] = 'regular'
+    parameters['exp_type'] = 'with_rgb'
 if 'start_x' not in parameters.keys(): 
     parameters['start_x'] = 500.0
 if 'start_y' not in parameters.keys(): 
@@ -750,7 +775,8 @@ if 'start_y' not in parameters.keys():
 if 'start_z' not in parameters.keys(): 
     parameters['start_z'] = 32.0
 if 'log_path' not in parameters.keys(): 
-    parameters['log_path'] = "..\\..\\Unreal Projects\Building99\Saved\\Logs\\Building_99.log"
+    parameters['log_path'] = "D:\\AD_Cookbook_AirSim\\Building99\\Building_99\\Saved\\Logs\\Building_99.log"
+
 
 # Check additional parameters needed for local run
 if 'local_run' in parameters:
