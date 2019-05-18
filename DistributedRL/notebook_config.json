@@ -9,6 +9,6 @@
     "batch_account_url": "https://explorationrlba.eastus.batch.azure.com",
     "batch_job_user_name": "explorationrl",
     "batch_job_user_password": "Erl53232",
-    "batch_pool_name": "erl_pool04",
-    "batch_pool_size": 8
+    "batch_pool_name": "erl_pool05",
+    "batch_pool_size": 1
 }

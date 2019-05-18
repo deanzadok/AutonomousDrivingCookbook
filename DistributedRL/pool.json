@@ -1,5 +1,5 @@
 {
-	"id": "erl_pool04",
+	"id": "erl_pool05",
 	"vmSize": "STANDARD_NV6",
 	"virtualMachineConfiguration": {
 		"imageReference": {
@@ -7,7 +7,7 @@
 		},
 		"nodeAgentSKUId": "batch.node.windows amd64"
 	},
-	"targetDedicatedNodes": 8,
+	"targetDedicatedNodes": 1,
 	"enableInterNodeCommunication": true,
 	"startTask": {
 		"commandLine": "C:\\ProgramData\\Anaconda3\\Scripts\\activate.bat py36 && python C:\\prereq\\setup_machine.py",
