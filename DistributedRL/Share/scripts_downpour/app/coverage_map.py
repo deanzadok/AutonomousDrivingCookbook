@@ -22,7 +22,7 @@ class CoverageMap:
         self.saved_reward = 0 # save reward in each iteration
         self.reward_norm = reward_norm # factor to normalize the reward
         self.reward_count = reward_count
-        self.reward_list = [0.0] * self.reward_count
+        self.reward_list = [1.0] * self.reward_count
         # prepare clean coverage map
         self.cov_map = np.zeros((int(self.map_size / self.scale_ratio), int(self.map_size / self.scale_ratio)))
 
@@ -32,7 +32,7 @@ class CoverageMap:
         self.saved_state = np.zeros((self.input_size, self.input_size))
         self.saved_reward = 0
         self.cov_map = np.zeros((int(self.map_size / self.scale_ratio), int(self.map_size / self.scale_ratio)))
-        self.reward_list = [0.0] * self.reward_count
+        self.reward_list = [1.0] * self.reward_count
 
     # set airsim client, to get position, orientation and lidar data
     def set_client(self, client):
@@ -135,6 +135,74 @@ class CoverageMap:
             return self.saved_state, sum(self.reward_list) / len(self.reward_list)
 
 
+class HistoryMap:
+
+    def __init__(self, start_point, map_size, input_size, map_boundaries):
+
+        self.start_point = start_point # agent's starting point from the simulation, in centimeters
+        self.map_size = map_size
+        self.input_size = input_size # final input size to be in the shape of [input_size, input_size], in centimeters
+        self.map_boundaries = map_boundaries
+        self.his_map = np.zeros((int(self.map_size), int(self.map_size)))
+
+        # clear coverage map and state
+    def reset(self):
+
+        self.his_map = np.zeros((int(self.map_size), int(self.map_size)))
+
+    # set airsim client, to get position, orientation and lidar data
+    def set_client(self, client):
+
+        self.client = client
+    
+
+    def get_state(self):
+        
+        # get car position, convert it to be relative to the world in centimeters, and convert it according to scale ratio
+        client_pose = self.client.simGetVehiclePose()
+        pose = [int(round((self.start_point[0] - (self.map_boundaries[0][0]) + (client_pose.position.x_val * 100.0))/((self.map_boundaries[0][1]-self.map_boundaries[0][0])/self.map_size))), 
+                int(round((self.start_point[1] - (self.map_boundaries[1][0]) + (client_pose.position.y_val * 100.0))/((self.map_boundaries[1][1]-self.map_boundaries[1][0])/self.map_size))),
+                int(round((self.start_point[2] + (client_pose.position.z_val * 100.0))))]
+
+        reward = 0.0
+        if self.his_map[pose[0],pose[1]] == 0.0:
+            self.his_map[pose[0],pose[1]] = 255.0
+            reward = 1.0
+
+        # scale using PIL
+        im = Image.fromarray(np.uint8(self.his_map))
+        im = im.resize((self.input_size, self.input_size), Image.NEAREST)
+        state = np.array(im)
+
+        return np.flip(state, axis=0), reward
+
+
+def get_depth_image(client):
+
+    responses = client.simGetImages([airsim.ImageRequest("RCCamera", airsim.ImageType.DepthPerspective, True, False)])
+    return transform_depth_input(responses)
+
+
+def transform_depth_input(responses):
+    img1d = np.array(responses[0].image_data_float, dtype=np.float)
+
+    if img1d.size > 1:
+
+        img1d = 255/np.maximum(np.ones(img1d.size), img1d)
+        img2d = np.reshape(img1d, (responses[0].height, responses[0].width))
+
+        image = Image.fromarray(img2d)
+
+        # debug only
+        #image_png = image.convert('RGB')
+        #image_png.save("DistributedRL\\debug\\{}.png".format(time.time()))
+
+        im_final = np.array(image.resize((84, 84)).convert('L')) 
+        #im_final = im_final / 255.0
+
+        return im_final
+
+    return np.zeros((84,84)).astype(float)
 
 if __name__ == "__main__":
 
@@ -143,8 +211,40 @@ if __name__ == "__main__":
     client.confirmConnection()
 
     # create coverage map and connect to client
+    start_point = [-1200.0, -500.0, 62.000687]
+    map_boundaries = [[-1400,400],[-1400,400]]
+    hisMap = HistoryMap(start_point=start_point, map_size=19, input_size=200, map_boundaries=map_boundaries)
+    hisMap.set_client(client=client)
+
+    # start free run session
+    i = 1
+    fps_sum = 0
+    while True:
+        startTime = time.time()
+
+        # get state and show it on screen
+        state, reward = hisMap.get_state()
+
+        cv2.imshow('navigation map (q to exit)', state)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+        endTime = time.time()
+
+        # present fps or reward
+        fps_sum += (1/(endTime-startTime))
+        print("fps average: %.2f" % (fps_sum/i))
+        print("reward: {}".format(reward))
+
+        i+=1
+        time.sleep(0.02)
+
+    cv2.destroyAllWindows()
+
+"""
+    # create coverage map and connect to client
     start_point = [500.0, 850.0, 32.0]
-    covMap = CoverageMap(start_point=start_point, map_size=12000, scale_ratio=1, state_size=4000, input_size=84, height_threshold=0.9, reward_norm=2000.0)
+    covMap = CoverageMap(start_point=start_point, map_size=12000, scale_ratio=20, state_size=4000, input_size=84, height_threshold=0.9, reward_norm=0.005)
     covMap.set_client(client=client)
 
     # start free run session
@@ -156,6 +256,7 @@ if __name__ == "__main__":
         # get state and show it on screen
         state, reward = covMap.get_state()
         #state = covMap.get_map_scaled()
+        #depth_im = get_depth_image(client)
 
         cv2.imshow('navigation map (q to exit)', state)
         if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -165,10 +266,12 @@ if __name__ == "__main__":
 
         # present fps or reward
         fps_sum += (1/(endTime-startTime))
-        #print("fps average: %.2f" % (fps_sum/i))
-        if i % 3 == 0:
-            print("reward: {}".format(reward))
+        print("fps average: %.2f" % (fps_sum/i))
+        #if i % 10 == 0:
+        #    print("reward: {}".format(reward))
 
         i+=1
+        time.sleep(0.02)
         
     cv2.destroyAllWindows()
+"""
