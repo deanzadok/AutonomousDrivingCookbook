@@ -27,7 +27,7 @@ import scipy
 import math
 import argparse
 import _cntk_py
-from coverage_map import CoverageMap, HistoryMap
+from coverage_map import CoverageMap
 from PIL import Image
 import errno
 
@@ -446,9 +446,9 @@ class DeepQAgent(object):
 
             img2d = np.reshape(img1d, (responses[0].height, responses[0].width))
 
-            from PIL import Image
             image = Image.fromarray(img2d)
             im_final = np.array(image.resize((84, 84)).convert('L')) 
+            im_final = im_final / 255.0
 
             return im_final
 
@@ -457,7 +457,7 @@ class DeepQAgent(object):
     # Gets a coverage image from AirSim
     def get_cov_image(self, coverage_map):
 
-        state, cov_reward = coverage_map.get_state()
+        state, cov_reward = coverage_map.get_state_from_pose()
         #state = self.coverage_map.get_map_scaled()
 
         # debug only
@@ -570,15 +570,13 @@ if __name__ == "__main__":
     car_controls = airsim.CarControls()
 
     # initiate coverage map
-    """
-    start_point = [840.0, 1200.0, 32.0]
-    coverage_map = CoverageMap(start_point=start_point, map_size=12000, scale_ratio=1, state_size=4000, input_size=84, height_threshold=0.9, reward_norm=3000.0)
-    coverage_map.set_client(client)
-    """
+
+    #start_point = [840.0, 1200.0, 32.0]
     start_point = [-1200.0, -500.0, 62.000687]
-    map_boundaries = [[-1400,400],[-1400,400]]
-    hisMap = HistoryMap(start_point=start_point, map_size=19, input_size=84, map_boundaries=map_boundaries)
-    hisMap.set_client(client=client)
+    
+    #coverage_map = CoverageMap(start_point=start_point, map_size=12000, scale_ratio=1, state_size=4000, input_size=84, height_threshold=0.9, reward_norm=3000.0)
+    coverage_map = CoverageMap(start_point=start_point, map_size=12000, scale_ratio=20, state_size=6000, input_size=20, height_threshold=0.9, reward_norm=30, paint_radius=15)
+    coverage_map.set_client(client)
 
     # let the car drive a bit
     car_controls.throttle = 0.3
@@ -600,14 +598,16 @@ if __name__ == "__main__":
     iterations = 0
     rewards_sum = 0
 
-    current_state, cov_reward = agent.get_cov_image(hisMap)
-    #current_state = agent.get_depth_image(client)
+    current_cov_state, cov_reward = agent.get_cov_image(coverage_map)
+    current_state = agent.get_depth_image(client)
+    current_state[:current_cov_state.shape[0],:current_cov_state.shape[1]] = current_cov_state
     while True:
         action, _ = agent.act(current_state)
         car_controls = interpret_action(action)
         client.setCarControls(car_controls)
 
         car_state = client.getCarState()
+        next_cov_state, cov_reward = agent.get_cov_image(coverage_map)
         reward = compute_reward(car_state, cov_reward) 
         done = isDone(car_state, car_controls, reward, iterations)
         if done == 1:
@@ -627,7 +627,7 @@ if __name__ == "__main__":
             time.sleep(1)
 
             # clear coverage map
-            hisMap.reset()
+            coverage_map.reset()
 
             # write all rewards to log file
             rewards_log = open(os.path.join(checkpoint_dir,"rewards.txt"),"a+")
@@ -643,7 +643,9 @@ if __name__ == "__main__":
             time.sleep(0.5)
 
             current_step +=1
-            print('number of steps: {}'.format(current_step))
+            #print('number of steps: {}'.format(current_step))
         
-        current_state, cov_reward = agent.get_cov_image(hisMap)
-        #current_state = agent.get_depth_image(client)
+        current_state = agent.get_depth_image(client)
+        current_state[:next_cov_state.shape[0],:next_cov_state.shape[1]] = next_cov_state
+        #image = Image.fromarray(np.uint8(current_state))
+        #image.save("DistributedRL\\debug\\{}.png".format(time.time()))

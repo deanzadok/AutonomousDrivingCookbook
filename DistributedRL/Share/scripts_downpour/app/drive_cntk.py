@@ -6,7 +6,7 @@ import time
 import sys
 import json
 import datetime
-from coverage_map import CoverageMap
+from coverage_map import CoverageMap, HistoryMap
 import os
 import PIL
 
@@ -18,7 +18,7 @@ from cntk_agent import DeepQAgent
 #from cntk.ops import abs, argmax, element_select, less, relu, reduce_max, reduce_sum, square, placeholder, minus, constant
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--path', '-path', help='model file path', default='C:\\Users\\t-dezado\\Desktop\\model870000', type=str)
+parser.add_argument('--path', '-path', help='model file path', default='C:\\Users\\t-dezado\\Desktop\\model17260000', type=str)
 parser.add_argument('--type', '-type', help='experiment type from [regular, with_rgb]', default='with_rgb', type=str)
 parser.add_argument('--state_size', '-state_size', help='the size of the state of the coverage map', default=4000, type=int)
 parser.add_argument('--reward_norm', '-reward_norm', help='factor to normalize the reward', default=2.0, type=float)
@@ -39,9 +39,15 @@ car_controls = airsim.CarControls()
 print('Connected!')
 
 # initiate coverage map
+"""
 start_point = [840.0, 1200.0, 32.0]
 coverage_map = CoverageMap(start_point=start_point, map_size=12000, scale_ratio=1, state_size=4000, input_size=84, height_threshold=0.9, reward_norm=3000.0)
 coverage_map.set_client(car_client)
+"""
+start_point = [-1200.0, -500.0, 62.000687]
+map_boundaries = [[-1400,400],[-1400,400]]
+hisMap = HistoryMap(start_point=start_point, map_size=19, input_size=84, map_boundaries=map_boundaries)
+hisMap.set_client(client=car_client)
 
 def interpret_action(action):
     car_controls.brake = 0
@@ -61,13 +67,13 @@ def interpret_action(action):
 # Gets a coverage image from AirSim
 def get_cov_image():
 
-    state, reward = coverage_map.get_state()
+    state, reward = hisMap.get_state()
     #state = coverage_map.get_map_scaled()
 
     # debug only
     #print(reward)
-    #im = PIL.Image.fromarray(np.uint8(state))
-    #im.save("DistributedRL\\debug\\{}.png".format(time.time()))
+    im = PIL.Image.fromarray(np.uint8(state))
+    im.save("DistributedRL\\debug\\{}.png".format(time.time()))
 
     state = state / 255.0
 
@@ -114,19 +120,23 @@ def get_depth_image():
 
 print('Running car for a few seconds...')
 car_controls.steering = 0
-car_controls.throttle = 0.5
+car_controls.throttle = 0.4
 car_controls.brake = 0
 car_client.setCarControls(car_controls)
 time.sleep(0.5)
 
 print('Running model')
+image = get_cov_image()
+#image = get_depth_image()
+
 while(True):
-    image = get_cov_image()
-    #image = get_depth_image()
 
     action, qvalues = agent.act(image, eval=True)
     car_controls = interpret_action(action)
     car_client.setCarControls(car_controls)
 
     #print('State = {0}, steering = {1}, throttle = {2}, brake = {3}'.format(next_state, car_controls.steering, car_controls.throttle, car_controls.brake))
-    print(qvalues)
+    #print(qvalues)
+
+    image = get_cov_image()
+    #image = get_depth_image()
