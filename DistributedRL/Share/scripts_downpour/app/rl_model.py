@@ -25,17 +25,16 @@ K.set_session(session)
 
 # A wrapper class for the DQN model
 class RlModel():
-    def __init__(self, weights_path, train_conv_layers, exp_type='with_rgb', buffer_len=4):
+    def __init__(self, weights_path, train_conv_layers, buffer_len=4):
 
         # actions list. each action will be in the form of [steering, is_reverse]
-        self.__actions = [[-1.0, False],
-                          [-0.5, False],
-                          [0.0, False],
-                          [0.5, False],
-                          [1.0, False]]
+        self.__actions = [[-1.0],
+                          [-0.5],
+                          [0.0],
+                          [0.5],
+                          [1.0]]
 
         self.__gamma = 0.99
-        self.__exp_type = exp_type
 
         # Original DQN architecture from "Playing Atari with Deep Reinforcement Learning" 
         # https://arxiv.org/pdf/1312.5602.pdf
@@ -44,43 +43,21 @@ class RlModel():
 
         #pic_input = Input(shape=(59,255,3))
         pic_input = Input(shape=(84,84,buffer_len))
-        #if self.__exp_type == 'with_rgb':
-        map_input = Input(shape=(40,40))
 
         # first convolution stack
         img_stack = Conv2D(32, 8, strides=(4, 4), name='convolution_a0', padding='valid', activation=activation, trainable=train_conv_layers)(pic_input)
         img_stack = Conv2D(64, 4, strides=(2, 2), name='convolution_a1', padding='valid', activation=activation, trainable=train_conv_layers)(img_stack)
         img_stack = Conv2D(64, 3, strides=(1, 1), name='convolution_a2', padding='valid', activation=activation, trainable=train_conv_layers)(img_stack)
-        #img_stack = Dropout(0.5)(img_stack)
         # flatten
         img_stack = Flatten()(img_stack)
-
-        if self.__exp_type == 'with_rgb':
-            # second convolution stack
-            #rgb_stack = Conv2D(32, 8, strides=(4, 4), name='convolution_b0', padding='valid', activation=activation, trainable=train_conv_layers)(rgb_input)
-            #rgb_stack = Conv2D(64, 4, strides=(2, 2), name='convolution_b1', padding='valid', activation=activation, trainable=train_conv_layers)(rgb_stack)
-            #rgb_stack = Conv2D(64, 3, strides=(1, 1), name='convolution_b2', padding='valid', activation=activation, trainable=train_conv_layers)(rgb_stack)
-            #rgb_stack = Dropout(0.5)(rgb_stack)
-            # flatten
-            #rgb_stack = Flatten()(rgb_stack)
-            map_stack = Flatten()(map_input)
-
-            # Fully connected layers
-            merged_stack = concatenate([img_stack, map_stack])
-            #merged_stack = GRU(units=1024, activation=activation)(merged_stack)
-            merged_stack = Dense(512, name='rl_dense', activation=activation, kernel_initializer=random_normal(stddev=0.01))(merged_stack)
-        else:
-            merged_stack = Dense(512, name='rl_dense', activation=activation, kernel_initializer=random_normal(stddev=0.01))(img_stack)
-
+        # FC stack
+        merged_stack = Dense(512, name='rl_dense', activation=activation, kernel_initializer=random_normal(stddev=0.01))(img_stack)
         output = Dense(len(self.__actions), name='rl_output', kernel_initializer=random_normal(stddev=0.01))(merged_stack)
 
-        #opt = Adam()
-        opt = RMSprop()
+        opt = Adam()
+        #opt = RMSprop()
 
-        if self.__exp_type == 'with_rgb':
-            self.__action_model = Model(inputs=[pic_input, map_input], outputs=output)
-        else:
-            self.__action_model = Model(inputs=[pic_input], outputs=output)
+        self.__action_model = Model(inputs=[pic_input], outputs=output)
 
         self.__action_model.compile(optimizer=opt, loss='mean_squared_error')
         self.__action_model.summary()
@@ -164,31 +141,17 @@ class RlModel():
     def get_gradient_update_from_batches(self, batches):
         pre_states = np.array(batches['pre_states'])
         post_states = np.array(batches['post_states'])
-        if self.__exp_type == 'with_rgb':
-            pre_rgbs = np.array(batches['pre_rgbs'])
-            post_rgbs = np.array(batches['post_rgbs'])
         rewards = np.array(batches['rewards'])
         actions = list(batches['actions'])
         is_not_terminal = np.array(batches['is_not_terminal'])
 
-        pre_states = pre_states[:, -1, :, :]
-        post_states = post_states[:, -1, :, :]
-
-        pre_rgbs = pre_rgbs.transpose(0, 2, 3, 1)
-        post_rgbs = post_rgbs.transpose(0, 2, 3, 1)
-
-        """
+        
         # Our model takes 4 consecutive images as input.
         # NCHW -> NHWC
         
         pre_states = pre_states.transpose(0, 2, 3, 1)
         post_states = post_states.transpose(0, 2, 3, 1)
-        
-        if self.__exp_type == 'with_rgb':
-            # For the next input, only read in the last image from each set of examples
-            pre_rgbs = pre_rgbs[:, -1, :, :, :]
-            post_rgbs = post_rgbs[:, -1, :, :, :]
-        """
+    
         # desired pre states previous shape is: [N, 59, 255, 3]
 
         print('START GET GRADIENT UPDATE DEBUG')
@@ -197,19 +160,11 @@ class RlModel():
         # To prevent the model from training the other actions, figure out what the model currently predicts for each input.
         # Then, the gradients with respect to those outputs will always be zero.
         with self.__action_context.as_default():
-            if self.__exp_type == 'with_rgb':
-                #labels = self.__action_model.predict([pre_states,pre_rgbs], batch_size=32)
-                labels = self.__action_model.predict([pre_rgbs, pre_states], batch_size=32)
-            else:
-                labels = self.__action_model.predict([pre_states], batch_size=32)
+            labels = self.__action_model.predict([pre_states], batch_size=32)
         
         # Find out what the target model will predict for each post-decision state.
         with self.__target_context.as_default():
-            if self.__exp_type == 'with_rgb':
-                #q_futures = self.__target_model.predict([post_states,post_rgbs], batch_size=32)
-                q_futures = self.__target_model.predict([post_rgbs, post_states], batch_size=32)
-            else:
-                q_futures = self.__target_model.predict([post_states], batch_size=32)
+            q_futures = self.__target_model.predict([post_states], batch_size=32)
 
         # Apply the Bellman equation
         q_futures_max = np.max(q_futures, axis=1)
@@ -222,11 +177,7 @@ class RlModel():
         # Perform a training iteration.
         with self.__action_context.as_default():
             original_weights = [np.array(w, copy=True) for w in self.__action_model.get_weights()]
-            if self.__exp_type == 'with_rgb':
-                #self.__action_model.fit([pre_states,pre_rgbs], labels, epochs=1, batch_size=32, verbose=1)
-                self.__action_model.fit([pre_rgbs, pre_states], labels, epochs=1, batch_size=32, verbose=1)
-            else:
-                self.__action_model.fit([pre_states], labels, epochs=1, batch_size=32, verbose=1)
+            self.__action_model.fit([pre_states], labels, epochs=1, batch_size=32, verbose=1)
             
             # Compute the gradients
             new_weights = self.__action_model.get_weights()
@@ -243,33 +194,16 @@ class RlModel():
         return [w.tolist() for w in gradients]
 
     # Performs a state prediction given the model input
-    def predict_state(self, observation, rgb):
+    def predict_state(self, observation):
         if (type(observation) == type([])):
-            observation = np.array(observation[-1])
-
-        """
             observation = np.array(observation)
-        
-        if self.__exp_type == 'with_rgb':
-            obs_rgb = np.array(rgb[-1])
-            obs_rgb = np.expand_dims(obs_rgb, axis=0)
 
         # Our model takes 4 consecutive images as input.
         observation = observation.transpose(1,2,0)
         observation = np.expand_dims(observation, axis=0)
-        """
-        observation = np.expand_dims(observation, axis=0)
-
-        obs_rgb = np.array(rgb)
-        obs_rgb = obs_rgb.transpose(1,2,0)
-        obs_rgb = np.expand_dims(obs_rgb, axis=0)
 
         with self.__action_context.as_default():
-            if self.__exp_type == 'with_rgb':
-                #predicted_qs = self.__action_model.predict([observation, obs_rgb])
-                predicted_qs = self.__action_model.predict([obs_rgb, observation])
-            else:
-                predicted_qs = self.__action_model.predict([observation])
+            predicted_qs = self.__action_model.predict([observation])
 
         # Select the action with the highest Q value
         predicted_state = np.argmax(predicted_qs)
@@ -280,9 +214,9 @@ class RlModel():
     def state_to_control_signals(self, state, car_state):
 
         if car_state.speed > 4:
-            return (self.__actions[state][0], self.__actions[state][1], 1.0)
+            return (self.__actions[state][0], 1.0)
         else:
-            return (self.__actions[state][0], self.__actions[state][1], 0.0)
+            return (self.__actions[state][0], 0.0)
 
     # Gets a random state
     # Used during annealing
