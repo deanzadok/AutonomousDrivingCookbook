@@ -15,10 +15,10 @@ with open('notebook_config.json', 'r') as f:
 
 batch_update_frequency = 25000
 max_epoch_runtime_sec = 30
-per_iter_epsilon_reduction=0.0001
+per_iter_epsilon_reduction=0.000001
 min_epsilon = 0.1
 batch_size = 32
-replay_memory_size = 2000
+replay_memory_size = 50000
 weights_path = ''
 train_conv_layers = 'false'
 
