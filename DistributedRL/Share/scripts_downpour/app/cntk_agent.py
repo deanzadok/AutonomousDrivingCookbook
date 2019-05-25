@@ -468,7 +468,7 @@ class DeepQAgent(object):
         state = state / 255.0
 
         return state, cov_reward
-
+"""
 def interpret_action(action):
     car_controls.brake = 0
     car_controls.throttle = 0.3
@@ -483,15 +483,22 @@ def interpret_action(action):
     else:
         car_controls.steering = -0.5
     return car_controls
-
+"""
 def compute_reward(car_state, cov_reward):
 
     #print(cov_reward)
+    
+    alpha = 0.7
+    max_speed = 2.5
 
     if car_state.speed < 0.02:
         return -3.0
 
-    return cov_reward
+    # compute reward based on speed or coverage
+    speed_reward = min(1.0, car_state.speed / max_speed)
+    reward = alpha * cov_reward + (1 - alpha) * speed_reward
+    
+    return reward
 
 def isDone(car_state, car_controls, reward, iteration):
     done = 0
@@ -588,8 +595,8 @@ if __name__ == "__main__":
     NumBufferFrames = 4
     SizeRows = 84
     SizeCols = 84
-    NumActions = 5
-    agent = DeepQAgent((NumBufferFrames, SizeRows, SizeCols), NumActions, monitor=True)
+    actions = [0.0, 1.0, -1.0, 0.5, -0.5]
+    agent = DeepQAgent((NumBufferFrames, SizeRows, SizeCols), len(actions), monitor=True)
 
     # Train
     epoch = 100
@@ -603,7 +610,7 @@ if __name__ == "__main__":
     current_state[:current_cov_state.shape[0],:current_cov_state.shape[1]] = current_cov_state
     while True:
         action, _ = agent.act(current_state)
-        car_controls = interpret_action(action)
+        car_controls.steering = actions[action]
         client.setCarControls(car_controls)
 
         car_state = client.getCarState()
@@ -622,8 +629,8 @@ if __name__ == "__main__":
 
         if done:
             client.reset()
-            car_control = interpret_action(1)
-            client.setCarControls(car_control)
+            car_controls.steering = actions[0]
+            client.setCarControls(car_controls)
             time.sleep(1)
 
             # clear coverage map
