@@ -7,6 +7,14 @@ import tensorflow as tf
 from tensorflow.keras.layers import Dense, Flatten, Conv2D
 from tensorflow.keras import Model
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--data_dir', '-data_dir', help='path to raw data folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Github\\AutonomousDrivingCookbook\\cooked_data', type=str)
+parser.add_argument('--output_dir', '-output_dir', help='path to output folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Github\\AutonomousDrivingCookbook\\models', type=str)
+parser.add_argument('--num_actions', '-num_actions', help='number of actions for the model to perdict', default=5, type=int)
+parser.add_argument('--batch_size', '-batch_size', help='number of samples in one minibatch', default=32, type=int)
+parser.add_argument('--epochs', '-epochs', help='number of epochs to train the model', default=20, type=int)
+args = parser.parse_args()
+
 # model definition class
 class RLModel(Model):
   def __init__(self):
@@ -49,14 +57,6 @@ def test(images, labels):
 
 
 if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--data_dir', '-data_dir', help='path to raw data folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Github\\AutonomousDrivingCookbook\\cooked_data', type=str)
-    parser.add_argument('--output_dir', '-output_dir', help='path to output folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Github\\AutonomousDrivingCookbook\\models', type=str)
-    parser.add_argument('--num_actions', '-num_actions', help='number of actions for the model to perdict', default=5, type=int)
-    parser.add_argument('--batch_size', '-batch_size', help='number of samples in one minibatch', default=32, type=int)
-    parser.add_argument('--epochs', '-epochs', help='number of epochs to train the model', default=20, type=int)
-    args = parser.parse_args()
 
     # upload train and test datasets
     train_dataset = h5py.File(os.path.join(args.data_dir, 'train.h5'), 'r')

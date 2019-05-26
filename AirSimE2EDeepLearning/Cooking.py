@@ -91,7 +91,11 @@ def generateDataMapAirSim(folders, buffer_size):
     all_mappings = {}
     for folder in folders:
         print('Reading data from {0}...'.format(folder))
-        current_df = pd.read_csv(os.path.join(folder, 'airsim_rec.txt'), sep='\t')
+        # check if the file was shifted
+        if os.path.isfile(os.path.join(folder, 'airsim_rec_shifted.txt')):
+            current_df = pd.read_csv(os.path.join(folder, 'airsim_rec_shifted.txt'), sep='\t')
+        else:
+            current_df = pd.read_csv(os.path.join(folder, 'airsim_rec.txt'), sep='\t')
         
         for i in range(buffer_size - 1, current_df.shape[0], 1):
 
