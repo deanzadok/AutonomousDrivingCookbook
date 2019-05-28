@@ -22,7 +22,9 @@ with open('C:/prereq/log.txt', 'w') as f:
     # Install required python packages
     do_command('pip install wheel --upgrade')
     do_command('pip install numpy==1.14.0')
+    #do_command('pip install numpy')
     do_command('pip install pandas==0.22.0')
+    #do_command('pip install tensorflow-gpu==2.0.0-alpha0')
     do_command('pip install tensorflow-gpu==1.4.0') #1.5.0 requires CUDA 9, which is not installed on the image we have.
     do_command('pip install keras==2.1.3')
     do_command('pip install msgpack==0.5.1')
@@ -32,7 +34,7 @@ with open('C:/prereq/log.txt', 'w') as f:
     do_command('pip install django-ipware==2.0.1')
     do_command('pip install requests==2.18.4')
     do_command('pip install opencv-python')
-    do_command('pip install https://cntk.ai/PythonWheel/GPU/cntk-2.3-cp36-cp36m-win_amd64.whl')
+    #do_command('pip install https://cntk.ai/PythonWheel/GPU/cntk-2.3-cp36-cp36m-win_amd64.whl')
 
     # Mount the file share
     do_command('call C:\\prereq\\mount.bat')

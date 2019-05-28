@@ -112,7 +112,7 @@ def get_depth_image():
         #image_png.save("DistributedRL\\debug\\{}.png".format(time.time()))
 
         im_final = np.array(image.resize((84, 84)).convert('L')) 
-        #im_final = im_final / 255.0
+        im_final = im_final / 255.0
 
         return im_final
 
