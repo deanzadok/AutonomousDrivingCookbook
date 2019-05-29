@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import setup_path
 import airsim
 import os
+import sys
 import time
 import numpy as np
 import h5py
@@ -14,12 +15,20 @@ from PIL import Image
 import errno
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--experiment_name', '-experiment_name', help='experiment name', default='local_run', type=str)
 parser.add_argument('--path', '-path', help='model file path', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Desktop\\model25.ckpt', type=str)
-parser.add_argument('--data_dir', '-data_dir', help='path to data folder', default=os.path.join(os.getcwd(), 'DistributedRL\\Share'), type=str)
 parser.add_argument('--output_dir', '-output_dir', help='path to output folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Github\\AutonomousDrivingCookbook\\DistributedRL\\Share\\checkpoint\\local_run', type=str)
+
+parser.add_argument('--buffer_size', '-buffer_size', help='number of observations in each sample', default=4, type=int)
+parser.add_argument('--input_size', '-input_size', help='width/height of the observation input', default=84, type=int)
+
 parser.add_argument('--batch_size', '-batch_size', help='number of samples in one minibatch', default=32, type=int)
-parser.add_argument('--epochs', '-epochs', help='number of epochs to train the model', default=20, type=int)
+parser.add_argument('--memory_size', '-memory_size', help='number of steps in the replay memory', default=500000, type=int)
+parser.add_argument('--train_after', '-train_after', help='number of steps to record before the first training session', default=200000, type=int)
+parser.add_argument('--train_interval', '-train_interval', help='number of steps between each training session', default=4, type=int)
+parser.add_argument('--target_update_interval', '-target_update_interval', help='number of steps between each target model update', default=10000, type=int)
+parser.add_argument('--steps', '-steps', help='number of steps required to lower the epsilon to minimal', default=1000000, type=int)
+parser.add_argument('--learning_rate', '-learning_rate', help='learning rate for the optimizer', default=0.00025, type=float)
+
 args = parser.parse_args()
 
 # model definition class
@@ -238,11 +247,10 @@ class DeepQAgent(object):
     Implementation of Deep Q Neural Network agent like in:
         Nature 518. "Human-level control through deep reinforcement learning" (Mnih & al. 2015)
     """
-    def __init__(self, input_shape, nb_actions,
-                 gamma=0.99, explorer=LinearEpsilonAnnealingExplorer(1, 0.1, 1000000),
-                 learning_rate=0.00025, momentum=0.95, minibatch_size=32,
-                 memory_size=500000, train_after=200000, train_interval=4, target_update_interval=10000, model_path="",
-                 monitor=True):
+    def __init__(self, input_shape, nb_actions, metrics_writer, checkpoint_path,
+                 gamma=0.99, explorer=LinearEpsilonAnnealingExplorer(1, 0.1, args.steps),
+                 learning_rate=args.learning_rate, momentum=0.95, minibatch_size=args.batch_size,
+                 memory_size=args.memory_size, train_after=args.train_after, train_interval=args.train_interval, target_update_interval=args.target_update_interval, model_path=""):
         self.input_shape = input_shape
         self.nb_actions = nb_actions
         self.gamma = gamma
@@ -268,27 +276,19 @@ class DeepQAgent(object):
             self._action_value_net.load_weights(model_path)
             print('model weights loaded from {}'.format(model_path))
 
-        # Define the loss, using Huber Loss (more robust to outliers)
-        @tf.function
-        def criterion(pre_states, actions, post_states, rewards, terminals):
-            # Compute the q_targets
-            q_targets = tf.where(terminals, rewards, gamma * tf.math.reduce_max(self._target_net(post_states), axis=0, keepdims=True) + rewards)
-
-            # actions is a 1-hot encoding of the action done by the agent
-            q_acted = tf.math.reduce_sum(self._action_value_net(pre_states) * actions, axis=0, keepdims=True)
-
-            # Define training criterion as the Huber Loss function
-            return tf.losses.huber_loss(q_targets, q_acted)
-
         # initiate loss and optimizer
-        self._loss = criterion
+        self._loss = tf.keras.losses.Huber()
         self._optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate, beta_1=momentum)
+
+        # initiate metrics 
         self._loss_metrics = tf.keras.metrics.Mean(name='train_loss')
+        self._loss_summary_writer = metrics_writer
 
         # Target model used to compute the target Q-values in training, updated
         # less frequently for increased stability.
         self._target_net = RLModel(self.nb_actions)
         self._target_net.set_weights(self._action_value_net.get_weights())
+        self._checkpoint_path = checkpoint_path
 
     def act(self, state, eval=False):
         """ This allows the agent to select the next action to perform in regard of the current state of the environment.
@@ -299,29 +299,32 @@ class DeepQAgent(object):
 
         Returns: Int >= 0 : Next action to do
         """
+        # tf function to predict q values
+        @tf.function
+        def predict_q_values(image):
+            return self._action_value_net(image)
 
         # Append the state to the short term memory (ie. History)
         self._history.append(state)
-        """
+        
         # If policy requires agent to explore, sample random action
         if self._explorer.is_exploring(self._num_actions_taken) and not eval:
             action = self._explorer(self.nb_actions)
             q_values = None
         else:
-        """
-        # Use the network to output the best action
-        env_with_history = self._history.value
-        env_with_history = np.expand_dims(env_with_history, axis=0)
-        env_with_history = env_with_history.transpose(0,2,3,1)
+            # Use the network to output the best action
+            env_with_history = self._history.value
+            env_with_history = np.expand_dims(env_with_history, axis=0)
+            env_with_history = env_with_history.transpose(0,2,3,1).astype(np.float64)
 
-        # Append batch axis with only one sample to evaluate
-        q_values = self.predict_q_values(env_with_history)
+            # Append batch axis with only one sample to evaluate
+            q_values = predict_q_values(env_with_history).numpy()
 
-        self._episode_q_means.append(np.mean(q_values))
-        self._episode_q_stddev.append(np.std(q_values))
+            self._episode_q_means.append(np.mean(q_values))
+            self._episode_q_stddev.append(np.std(q_values))
 
-        # Return the value maximizing the expected reward
-        action = q_values.argmax()
+            # Return the value maximizing the expected reward
+            action = q_values.argmax()
 
         # Keep track of interval action counter
         self._num_actions_taken += 1
@@ -364,15 +367,22 @@ class DeepQAgent(object):
         
         # tf function to train
         @tf.function
-        def train(pre_states, actions, post_states, rewards, terminals):
+        def train_model(pre_states, actions, post_states, rewards, terminals):
             with tf.GradientTape() as tape:
-                loss = self._loss(pre_states, actions, post_states, rewards, terminals)
+
+                # Compute the q_targets
+                q_targets = tf.where(terminals, rewards, self.gamma * tf.math.reduce_max(self._target_net(post_states), axis=1) + rewards)
+
+                # actions is already a 1-hot encoding of the action done by the agent
+                q_acted = tf.math.reduce_sum(self._action_value_net(pre_states) * actions, axis=1)
+
+                # Compute Huber loss on the q values and the predicted ones
+                loss = self._loss(q_targets, q_acted)
 
             gradients = tape.gradient(loss, self._action_value_net.trainable_variables)
             self._optimizer.apply_gradients(zip(gradients, self._action_value_net.trainable_variables))
 
             self._loss_metrics(loss)
-
 
         agent_step = self._num_actions_taken
 
@@ -381,13 +391,27 @@ class DeepQAgent(object):
                 #print('training... number of steps: {}'.format(agent_step))
 
                 pre_states, actions, post_states, rewards, terminals = self._memory.minibatch(self._minibatch_size)
-                train(pre_states, actions, post_states, rewards, terminals)
+
+                # prepare minibatch for tf training
+                pre_states = pre_states.transpose(0, 2, 3, 1).astype(np.float64) # NCHW => NHWC
+                post_states = post_states.transpose(0, 2, 3, 1).astype(np.float64) # NCHW => NHWC
+                terminals_bool = terminals.astype(bool) # binary => boolean
+                rewards = rewards.astype(np.float64)
+                actions_onehot = np.zeros((self._minibatch_size, self.nb_actions)) # indices => one hot vectors
+                actions_onehot[np.arange(self._minibatch_size), actions] = 1
+
+                train_model(pre_states, actions_onehot, post_states, rewards, terminals_bool)
 
                 # Update the Target Network if needed
                 if (agent_step % self._target_update_interval) == 0:
-                    self._target_net = tf.keras.models.clone_model(self._action_value_net)
-                    filename = os.path.join(args.output_dir, "model{}.ckpt".format(agent_step))
+                    self._target_net.set_weights(self._action_value_net.get_weights())
+                    filename = os.path.join(self._checkpoint_path, "model{}.ckpt".format(agent_step))
                     self._action_value_net.save_weights(filename)
+
+                    print('Step: {}, Loss: {}'.format(agent_step, self._loss_metrics.result()))
+                    # use tensorboard to inspect loss
+                    with self._loss_summary_writer.as_default():
+                        tf.summary.scalar('loss', self._loss_metrics.result(), step=agent_step)
 
     def get_depth_image(self, client):
         # get depth image from airsim
@@ -419,11 +443,6 @@ class DeepQAgent(object):
         # normalize state
         state = state / 255.0
         return state, cov_reward
-
-    # tf function to predict q values
-    @tf.function
-    def predict_q_values(self, image):
-        return self._action_value_net(image)
 
 def compute_reward(car_state, cov_reward):
 
@@ -468,33 +487,25 @@ def connect_to_airsim():
 
             time.sleep(1)
 
-# Sets up the logging framework.
-# This allows us to log using simple print() statements.
-# The output is redirected to a unique file on the file share.
-def setup_logs(parameters):
-    output_dir = 'Z:\\logs\\{0}\\agent'.format(parameters['experiment_name'])
-    if not os.path.isdir(output_dir):
-        try:
-            os.makedirs(output_dir)
-        except OSError as e:
-            if e.errno != errno.EEXIST:
-                raise
-    sys.stdout = open(os.path.join(output_dir, '{0}.stdout.txt'.format(os.environ['AZ_BATCH_NODE_ID'])), 'w')
-    sys.stderr = open(os.path.join(output_dir, '{0}.stderr.txt'.format(os.environ['AZ_BATCH_NODE_ID'])), 'w')
-
 
 if __name__ == "__main__":
 
-    if args.experiment_name != 'local_run':
-        setup_logs(parameters)
+    # allow growth is possible using an env var in tf2.0
+    os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
     # create rewards txt file
-    checkpoint_dir = os.path.join(args.data_dir, 'checkpoint', args.experiment_name)
+    if not os.path.isdir(args.output_dir):
+        os.makedirs(args.output_dir)
+    # make metrics and checkpoints folder
+    metrics_dir = os.path.join(args.output_dir,'metrics')
+    checkpoint_dir = os.path.join(args.output_dir, 'checkpoint')
+    if not os.path.isdir(metrics_dir):
+        os.makedirs(metrics_dir)
     if not os.path.isdir(checkpoint_dir):
         os.makedirs(checkpoint_dir)
-    rewards_log = open(os.path.join(checkpoint_dir,"rewards.txt"),"w")
-    rewards_log.write("Timestamp\tSum\tMean\n")
-    rewards_log.close()
+        
+    # metrics file
+    metrics_writer = tf.summary.create_file_writer(metrics_dir)
 
     # connect to airsim
     client = connect_to_airsim()
@@ -512,14 +523,12 @@ if __name__ == "__main__":
     time.sleep(0.5)
 
     # Make RL agent
-    input_shape = (4, 84, 84)
+    input_shape = (args.buffer_size, args.input_size, args.input_size)
     actions = [-1.0, -0.5, 0, 0.5, 1.0]
-    agent = DeepQAgent(input_shape, len(actions), model_path=args.path, monitor=True)
+    agent = DeepQAgent(input_shape, len(actions), model_path=args.path, checkpoint_path=checkpoint_dir, metrics_writer=metrics_writer)
 
     # Train
-    epoch = 100
     current_step = 0
-    max_steps = epoch * 250000
     iterations = 0
     rewards_sum = 0
 
@@ -551,7 +560,7 @@ if __name__ == "__main__":
 
         # train agent
         agent.observe(state, action, reward, done)
-        agent.train(checkpoint_dir)
+        agent.train(args.output_dir)
 
         if done:
             client.reset()
@@ -562,10 +571,11 @@ if __name__ == "__main__":
             # clear coverage map
             coverage_map.reset()
 
-            # write all rewards to log file
-            rewards_log = open(os.path.join(checkpoint_dir,"rewards.txt"),"a+")
-            rewards_log.write("{}\t{}\t{}\n".format(time.time(),rewards_sum,rewards_sum/iterations))
-            rewards_log.close()
+            # save rewards to view with tensorboard
+            with metrics_writer.as_default():
+                tf.summary.scalar('rewards sum', rewards_sum, step=current_step)
+                tf.summary.scalar('rewards mean', rewards_sum/iterations, step=current_step)
+
             rewards_sum = 0 # reset reward sum
             iterations = 0
 
