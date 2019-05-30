@@ -7,6 +7,7 @@ import time
 import numpy as np
 import h5py
 import argparse
+import cv2
 import tensorflow as tf
 from tensorflow.keras.layers import Dense, Flatten, Conv2D
 from tensorflow.keras import Model
@@ -17,9 +18,11 @@ import errno
 parser = argparse.ArgumentParser()
 parser.add_argument('--path', '-path', help='model file path', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Desktop\\model25.ckpt', type=str)
 parser.add_argument('--output_dir', '-output_dir', help='path to output folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Github\\AutonomousDrivingCookbook\\DistributedRL\\Share\\checkpoint\\local_run', type=str)
+parser.add_argument('--debug', '-debug', dest='debug', action='store_true')
 
 parser.add_argument('--buffer_size', '-buffer_size', help='number of observations in each sample', default=4, type=int)
 parser.add_argument('--input_size', '-input_size', help='width/height of the observation input', default=84, type=int)
+parser.add_argument('--cov_method', '-cov_method', help='coverage method to use, choose from [pose, lidar]', default='pose', type=str)
 
 parser.add_argument('--batch_size', '-batch_size', help='number of samples in one minibatch', default=32, type=int)
 parser.add_argument('--memory_size', '-memory_size', help='number of steps in the replay memory', default=500000, type=int)
@@ -434,7 +437,10 @@ class DeepQAgent(object):
     # Gets a coverage image from AirSim
     def get_cov_image(self, coverage_map):
 
-        state, cov_reward = coverage_map.get_state_from_pose()
+        if args.cov_method == 'pose':
+            state, cov_reward = coverage_map.get_state_from_pose()
+        else: # args.cov_method = 'lidar'
+            state, cov_reward = coverage_map.get_state_from_lidar()
 
         # debug only
         #im = Image.fromarray(np.uint8(state))
@@ -541,6 +547,12 @@ if __name__ == "__main__":
         state = agent.get_depth_image(client)
         state[:cov_state.shape[0],:cov_state.shape[1]] = cov_state
 
+        # present state if debug mode is on
+        if args.debug:
+            cv2.imshow('navigation map', state)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
         # get action and perform
         action, _ = agent.act(state)
         car_controls.steering = actions[action]
@@ -549,6 +561,7 @@ if __name__ == "__main__":
         # compute reward and detect terminal state
         car_state = client.getCarState()
         cov_state, cov_reward = agent.get_cov_image(coverage_map)
+        print('reward: {}'.format(cov_reward))
         reward = compute_reward(car_state, cov_reward) 
         done = isDone(car_state, car_controls, reward, iterations)
         if done == 1:
