@@ -57,6 +57,9 @@ def predict_action(image):
 
 if __name__ == "__main__":
 
+    # allow growth is possible using an env var in tf2.0
+    os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+
     # Load the model
     model = RLModel()
     model.load_weights(args.path)
