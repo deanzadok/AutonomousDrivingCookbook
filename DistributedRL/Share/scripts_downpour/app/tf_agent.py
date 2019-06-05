@@ -16,7 +16,7 @@ from PIL import Image
 import errno
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--path', '-path', help='model file path', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Desktop\\model25.ckpt', type=str)
+parser.add_argument('--path', '-path', help='model file path', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Desktop\\model270000.ckpt', type=str)
 parser.add_argument('--output_dir', '-output_dir', help='path to output folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Github\\AutonomousDrivingCookbook\\DistributedRL\\Share\\checkpoint\\local_run', type=str)
 parser.add_argument('--debug', '-debug', dest='debug', action='store_true')
 
@@ -251,8 +251,7 @@ class DeepQAgent(object):
         Nature 518. "Human-level control through deep reinforcement learning" (Mnih & al. 2015)
     """
     def __init__(self, input_shape, nb_actions, metrics_writer, checkpoint_path,
-                 gamma=0.99, explorer=LinearEpsilonAnnealingExplorer(1, 0.1, args.steps),
-                 learning_rate=args.learning_rate, momentum=0.95, minibatch_size=args.batch_size,
+                 gamma=0.99, learning_rate=args.learning_rate, momentum=0.95, minibatch_size=args.batch_size,
                  memory_size=args.memory_size, train_after=args.train_after, train_interval=args.train_interval, target_update_interval=args.target_update_interval, model_path=""):
         self.input_shape = input_shape
         self.nb_actions = nb_actions
@@ -262,7 +261,6 @@ class DeepQAgent(object):
         self._train_interval = train_interval
         self._target_update_interval = target_update_interval
 
-        self._explorer = explorer
         self._minibatch_size = minibatch_size
         self._history = History(input_shape)
         self._memory = ReplayMemory(memory_size, input_shape[1:], 4)
@@ -276,6 +274,14 @@ class DeepQAgent(object):
 
         # load pre trained weights if exist
         if model_path != "":
+            previous_steps = int(model_path.split('\\')[-1].split('.')[-2][5:])
+            if previous_steps > args.train_after:
+                epsilon_steps = args.steps - previous_steps
+            else:
+                epsilon_steps = args.steps
+
+            self._explorer = LinearEpsilonAnnealingExplorer(1, 0.1, epsilon_steps)
+            
             self._action_value_net.load_weights(model_path)
             print('model weights loaded from {}'.format(model_path))
 
@@ -561,7 +567,7 @@ if __name__ == "__main__":
         # compute reward and detect terminal state
         car_state = client.getCarState()
         cov_state, cov_reward = agent.get_cov_image(coverage_map)
-        print('reward: {}'.format(cov_reward))
+        #print('reward: {}'.format(cov_reward))
         reward = compute_reward(car_state, cov_reward) 
         done = isDone(car_state, car_controls, reward, iterations)
         if done == 1:
