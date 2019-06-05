@@ -18,7 +18,7 @@ class VAEModel(Model):
         self.stddev_epsilon = stddev_epsilon
 
         # Encoder architecture
-        self.conv1 = Conv2D(input_shape=(84, 84, 1), filters=64, kernel_size=4, strides=2, activation='relu')
+        self.conv1 = Conv2D(input_shape=(28, 28, 1), filters=64, kernel_size=4, strides=2, activation='relu')
         self.conv2 = Conv2D(filters=128, kernel_size=4, strides=2, activation='relu')
         self.bn1 = BatchNormalization(momentum=0.9, epsilon=1e-5)
         self.flatten = Flatten()
@@ -31,15 +31,14 @@ class VAEModel(Model):
         self.stddev_params = Lambda(lambda x: x[:, self.n_z:])
 
         # Decoder architecture
-        self.concat = Concatenate()
         self.d3 = Dense(units=1024, activation='relu')
         self.bn3 = BatchNormalization(momentum=0.9, epsilon=1e-5)
-        self.d4 = Dense(units=128 * 19 * 19, activation='relu')
+        self.d4 = Dense(units=128 * 7 * 7, activation='relu')
         self.bn4 = BatchNormalization(momentum=0.9, epsilon=1e-5)
-        self.reshape = Reshape((19, 19, 128))
-        self.deconv1 = Conv2DTranspose(filters=64, kernel_size=5, strides=2, activation='relu')
+        self.reshape = Reshape((7, 7, 128))
+        self.deconv1 = Conv2DTranspose(filters=64, kernel_size=4, strides=2, padding='same', activation='relu')
         self.bn5 = BatchNormalization(momentum=0.9, epsilon=1e-5)
-        self.deconv2 = Conv2DTranspose(filters=1, kernel_size=4, strides=2, activation='sigmoid')
+        self.deconv2 = Conv2DTranspose(filters=1, kernel_size=4, strides=2, padding='same', activation='sigmoid')
 
     def call(self, x):
 
@@ -104,7 +103,7 @@ def test(images, labels):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_dir', '-data_dir', help='path to raw data folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Github\\AutonomousDrivingCookbook\\cooked_data', type=str)
+    parser.add_argument('--data_dir', '-data_dir', help='path to raw data folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Data\\cooked_data', type=str)
     parser.add_argument('--output_dir', '-output_dir', help='path to output folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Github\\AutonomousDrivingCookbook\\models', type=str)
     parser.add_argument('--batch_size', '-batch_size', help='number of samples in one minibatch', default=32, type=int)
     parser.add_argument('--epochs', '-epochs', help='number of epochs to train the model', default=20, type=int)

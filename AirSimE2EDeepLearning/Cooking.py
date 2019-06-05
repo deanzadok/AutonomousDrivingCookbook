@@ -24,7 +24,7 @@ def checkAndCreateDir(full_path):
             if exc.errno != errno.EEXIST:
                 raise
                 
-def readImagesFromPath(image_names, img_type):
+def readImagesFromPath(image_names, img_type, dest_res):
     """ Takes in a path and a list of image file names to be loaded and returns a list of all loaded images after resize.
            Inputs:
                 image_names: list of image names
@@ -38,6 +38,8 @@ def readImagesFromPath(image_names, img_type):
         for image_name in image_buffer_names:
 
             im = Image.open(image_name)
+            if dest_res > 0:
+                im = im.resize((dest_res, dest_res), Image.ANTIALIAS)
             imArr = np.asarray(im)
         
             #Remove alpha channel if exists
@@ -140,7 +142,7 @@ def generatorForH5py(data_mappings, chunk_size=32):
             #    raise StopIteration
     #raise StopIteration
     
-def saveH5pyData(data_mappings, target_file_path, img_type):
+def saveH5pyData(data_mappings, target_file_path, img_type, dest_res):
     """
     Saves H5 data to file
     """
@@ -148,7 +150,7 @@ def saveH5pyData(data_mappings, target_file_path, img_type):
     gen = generatorForH5py(data_mappings,chunk_size)
 
     images_names_chunk, labels_chunk = next(gen)
-    images_chunk = np.asarray(readImagesFromPath(images_names_chunk, img_type))
+    images_chunk = np.asarray(readImagesFromPath(images_names_chunk, img_type, dest_res))
     row_count = images_chunk.shape[0]
 
     checkAndCreateDir(target_file_path)
@@ -168,7 +170,7 @@ def saveH5pyData(data_mappings, target_file_path, img_type):
         dset_labels[:] = labels_chunk
 
         for images_names_chunk, label_chunk in gen:
-            images_chunk = np.asarray(readImagesFromPath(images_names_chunk, img_type))
+            images_chunk = np.asarray(readImagesFromPath(images_names_chunk, img_type, dest_res))
             
             # Resize the dataset to accommodate the next chunk of rows
             dset_images.resize(row_count + images_chunk.shape[0], axis=0)
@@ -181,7 +183,7 @@ def saveH5pyData(data_mappings, target_file_path, img_type):
             row_count += images_chunk.shape[0]
             
             
-def cook(folders, output_directory, buffer_size, img_type, train_eval_test_split):
+def cook(folders, output_directory, buffer_size, img_type, dest_res, train_eval_test_split):
     """ Primary function for data pre-processing. Reads and saves all data as h5 files.
             Inputs:
                 folders: a list of all data folders
@@ -198,5 +200,5 @@ def cook(folders, output_directory, buffer_size, img_type, train_eval_test_split
         
         for i in range(0, len(split_mappings), 1):
             print('Processing {0}...'.format(output_files[i]))
-            saveH5pyData(split_mappings[i], output_files[i], img_type)
+            saveH5pyData(split_mappings[i], output_files[i], img_type, dest_res)
             print('Finished saving {0}.'.format(output_files[i]))
