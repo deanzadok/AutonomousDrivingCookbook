@@ -10,47 +10,106 @@ import keyboard  # using module keyboard
 import math
 from PIL import Image
 from coverage_map import CoverageMap
-	
-# connect to the AirSim simulator 
+import argparse
+import cv2
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--camera', '-camera', help='type of the camera. choose from [rgb, depth, grayscale]', default='grayscale', type=str)
+args = parser.parse_args()
+
+# connect to the AirSim simulator
 client = airsim.CarClient()
 client.confirmConnection()
+client.enableApiControl(True)
 car_controls = airsim.CarControls()
 
+# let the car start driving
+car_controls.throttle = 0.6
+car_controls.steering = 0
+client.setCarControls(car_controls)
+
 # create coverage map and connect to client
-start_point = [-1200.0, -500.0, 62.000687]
-covMap = CoverageMap(start_point=start_point, map_size=12000, scale_ratio=20, state_size=6000, input_size=20, height_threshold=0.9, reward_norm=30, paint_radius=15)
+start_point = [-290.0, 10050.0, 10.0]
+covMap = CoverageMap(start_point=[0,0,0], map_size=64000, scale_ratio=20, state_size=6000, input_size=20, height_threshold=0.9, reward_norm=30, paint_radius=15)
 covMap.set_client(client=client)
 
 # create experiments directories
-experiment_dir = os.path.join(os.path.expanduser('~'), 'Documents\AirSim', datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
+#experiment_dir = os.path.join(os.path.expanduser('~'), 'Documents\\AirSim', datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
+experiment_dir = os.path.join('C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\AirSim', datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
 images_dir = os.path.join(experiment_dir, 'images')
 os.makedirs(images_dir)
 
 # create txt file
 airsim_rec = open(os.path.join(experiment_dir,"airsim_rec.txt"),"w") 
-airsim_rec.write("TimeStamp\tPOS_X\tPOS_Y\tPOS_Z\tRPM\tSpeed\tImageFile\n") 
+airsim_rec.write("TimeStamp\tPOS_X\tPOS_Y\tPOS_Z\tRPM\tSpeed\tSteering\tImageFile\n") 
+
+# actions list
+actions = [-1.0, -0.5, 0, 0.5, 1.0]
+actions_idx = 2
 
 idx = 0
 while True:
 
     time_stamp = int(time.time()*10000000)
 
-    # get image from AirSim
-    image_response = client.simGetImages([airsim.ImageRequest("RCCamera", airsim.ImageType.Scene, False, False)])[0]
-    image1d = np.fromstring(image_response.image_data_uint8, dtype=np.uint8)
-    if image1d.size > 1:
-        image_rgba = image1d.reshape(image_response.height, image_response.width, 4)
+    # change steering according to keyboard
+    if keyboard.is_pressed('a'):
+        actions_idx = 0
+    if keyboard.is_pressed('w'):
+        actions_idx = 1
+    if keyboard.is_pressed('s'):
+        actions_idx = 2
+    if keyboard.is_pressed('e'):
+        actions_idx = 3
+    if keyboard.is_pressed('d'):
+        actions_idx = 4
+
+    car_controls.steering = actions[actions_idx]
+    client.setCarControls(car_controls)
+    print("steering: {}".format(actions[actions_idx]))
+
+    if args.camera == 'depth':
+        # get depth image from airsim
+        responses = client.simGetImages([airsim.ImageRequest("RCCamera", airsim.ImageType.DepthPerspective, True, False)])
+        img1d = np.array(responses[0].image_data_float, dtype=np.float)
+        img1d = 255/np.maximum(np.ones(img1d.size), img1d)
+        if img1d.size > 1:
+            img2d = np.reshape(img1d, (responses[0].height, responses[0].width))
+            image = Image.fromarray(img2d)
+            image_np = np.array(image.resize((84, 84)).convert('L')) 
+        else:
+            image_np = np.zeros((84,84)).astype(float)
+    else: # args.camera = 'rgb' or 'grayscale'
+        # get image from AirSim
+        image_response = client.simGetImages([airsim.ImageRequest("RCCamera", airsim.ImageType.Scene, False, False)])[0]
+        img1d = np.fromstring(image_response.image_data_uint8, dtype=np.uint8)
+        if img1d.size > 1:
+            img2d = np.reshape(img1d, (image_response.height, image_response.width, 3))
+            image = Image.fromarray(img2d)
+            if args.camera == 'grayscale':
+                image = image.convert('L')
+            image_np = np.array(image.resize((84, 84)))
+            
+        else:
+            if args.camera == 'grayscale':
+                image_np = np.zeros((84,84)).astype(float)
+            else:
+                image_np = np.zeros((84,84,3)).astype(float)
+
+    # get coverage image
+    cov_image, reward = covMap.get_state_from_pose()
+    #print("reward: {}".format(reward))
+
+    # combine both inputs
+    if args.camera == 'depth' or args.camera == 'grayscale':
+        image_np[:cov_image.shape[0],:cov_image.shape[1]] = cov_image
     else:
-        image_rgba = np.zeros((144,259,3)).astype(float)
-    
-    # get coverage image and put it inside the RGB image
-    cov_image, _ = covMap.get_state_from_pose()
-    cov_image = np.expand_dims(cov_image, axis=2)
-    cov_image = np.repeat(cov_image, 4, axis=2)
-    image_rgba[:cov_image.shape[0],:cov_image.shape[1],:] = cov_image
+        cov_rgb_image = np.expand_dims(cov_image, axis=2)
+        cov_rgb_image = np.repeat(cov_rgb_image, 3, axis=2)
+        image_np[:cov_rgb_image.shape[0],:cov_rgb_image.shape[1],:] = cov_rgb_image
 
     # save the combined image
-    im = Image.fromarray(np.uint8(image_rgba))
+    im = Image.fromarray(np.uint8(image_np))
     im.save(os.path.join(images_dir, "ptc_{}.png".format(time_stamp)))
 	
     # get position and car state
@@ -58,13 +117,17 @@ while True:
     car_state = client.getCarState()
 
     # write meta-date to text file
-    airsim_rec.write("{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(time_stamp,client_pose.position.x_val,client_pose.position.y_val,client_pose.position.z_val,car_state.rpm,car_state.speed,"ptc_{}.png".format(time_stamp))) 
-		
+    airsim_rec.write("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(time_stamp,client_pose.position.x_val,client_pose.position.y_val,client_pose.position.z_val,car_state.rpm,car_state.speed,car_controls.steering,"ptc_{}.png".format(time_stamp))) 
+	
+    # present state image
+    cv2.imshow('navigation map', image_np)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
     if keyboard.is_pressed('q'):  # if key 'q' is pressed
         airsim_rec.close()
+        cv2.destroyAllWindows()
         quit()
 	
     idx += 1
-    time.sleep(0.2)
-
-airsim_rec.close() 
+    #time.sleep(0.2)
