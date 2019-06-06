@@ -68,13 +68,14 @@ class VAEModel(Model):
 
 
 @tf.function
-def compute_loss(y, y_pred, mean, stddev):
+def compute_loss(y, y_pred, means, stddev):
 
     # copute reconstruction loss
-    recon_loss = tf.reduce_mean(tf.keras.losses.MSE(y, y_pred))
+    #recon_loss = tf.reduce_mean(tf.keras.losses.MSE(y, y_pred))
+    recon_loss = loss_object(y, y_pred)
 
     # copute KL loss: D_KL(Q(z|X,y) || P(z|X))
-    kl_loss = tf.reduce_mean(0.5 * tf.reduce_sum(tf.square(mean) + tf.square(stddev) - tf.math.log(1e-8 + tf.square(stddev)) - 1, [1]))
+    kl_loss = tf.reduce_mean(0.5 * tf.reduce_sum(tf.square(means) + tf.square(stddev) - tf.math.log(1e-8 + tf.square(stddev)) - 1, [1]))
 
     return recon_loss, kl_loss
 
@@ -107,7 +108,7 @@ if __name__ == "__main__":
     parser.add_argument('--output_dir', '-output_dir', help='path to output folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Github\\AutonomousDrivingCookbook\\models', type=str)
     parser.add_argument('--batch_size', '-batch_size', help='number of samples in one minibatch', default=32, type=int)
     parser.add_argument('--epochs', '-epochs', help='number of epochs to train the model', default=20, type=int)
-    parser.add_argument('--n_z', '-n_z', help='size of the each one of the parameters [mean,stddev] in the latent space', default=32, type=int)
+    parser.add_argument('--n_z', '-n_z', help='size of the each one of the parameters [mean,stddev] in the latent space', default=8, type=int)
     args = parser.parse_args()
 
     # allow growth is possible using an env var in tf2.0
@@ -134,6 +135,7 @@ if __name__ == "__main__":
     
     # create model, loss and optimizer
     model = VAEModel(n_z=args.n_z)
+    loss_object = tf.keras.losses.BinaryCrossentropy()
     optimizer = tf.keras.optimizers.Adam()
 
     # define metrics
