@@ -6,6 +6,7 @@ import argparse
 import tensorflow as tf
 from train_vae import VAEModel
 from PIL import Image
+import matplotlib.pyplot as plt
 
 # tf function to train
 @tf.function
@@ -42,7 +43,7 @@ if __name__ == "__main__":
     parser.add_argument('--model_path', '-model_path', help='model file path', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Github\\AutonomousDrivingCookbook\\models\\vaemodel35.ckpt', type=str)
     parser.add_argument('--output_dir', '-output_dir', help='path to output folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Github\\AutonomousDrivingCookbook\\models', type=str)
     parser.add_argument('--batch_size', '-batch_size', help='number of samples in one minibatch', default=32, type=int)
-    parser.add_argument('--epochs', '-epochs', help='number of epochs to train the model', default=40, type=int)
+    parser.add_argument('--epochs', '-epochs', help='number of epochs to train the model', default=100, type=int)
     parser.add_argument('--n_z', '-n_z', help='size of the each one of the parameters [mean,stddev] in the latent space', default=8, type=int)
     parser.add_argument('--img', '-img', help='image file path', default='AirSimE2EDeepLearning\\img.png', type=str)
     parser.add_argument('--res', '-res', help='destination resolution for images in the cooked data. if 0, do nothing', default=28, type=int)
@@ -78,6 +79,9 @@ if __name__ == "__main__":
     if not os.path.isdir(args.output_dir):
         os.makedirs(args.output_dir)
 
+    train_loss_list = []
+    test_loss_list = []
+
     # train
     print('Start training...')
     for epoch in range(args.epochs):
@@ -100,3 +104,16 @@ if __name__ == "__main__":
             model.save_weights(os.path.join(args.output_dir, "segmodel{}.ckpt".format(epoch)))
         
         print('Epoch {}, Loss: {}, Test Loss: {}'.format(epoch+1, train_loss.result(), test_loss.result()))
+
+        train_loss_list.append(train_loss.result())
+        test_loss_list.append(test_loss.result())
+
+# plot the results
+plt.plot(range(args.epochs), train_loss_list)
+plt.plot(range(args.epochs), test_loss_list)
+plt.xlabel('epochs')
+plt.ylabel('Loss')
+plt.title('Loss')
+plt.legend(loc='best')
+plt.grid(True)
+plt.savefig(os.path.join(args.output_dir, 'loss.png'))
