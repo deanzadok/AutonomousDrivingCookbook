@@ -9,10 +9,11 @@ from utils import *
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_dir', '-data_dir', help='path to raw data folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Data\\cooked_data\\imitation_4images_64', type=str)
-parser.add_argument('--output_dir', '-output_dir', help='path to output folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\models\\imitation_4images_vae_64', type=str)
+parser.add_argument('--output_dir', '-output_dir', help='path to output folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\models\\test', type=str)
 parser.add_argument('--batch_size', '-batch_size', help='number of samples in one minibatch', default=32, type=int)
 parser.add_argument('--epochs', '-epochs', help='number of epochs to train the model', default=40, type=int)
 parser.add_argument('--n_z', '-n_z', help='size of the each one of the parameters [mean,stddev] in the latent space', default=8, type=int)
+parser.add_argument('--res', '-res', help='destination resolution for images in the cooked data. if 0, do nothing', default=64, type=int)
 args = parser.parse_args()
 
 @tf.function
@@ -56,7 +57,7 @@ os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 train_ds, test_ds = create_dataset(args.data_dir, args.batch_size, label_type='image')
 
 # create model, loss and optimizer
-model = VAEModel(n_z=args.n_z, res=64)
+model = VAEModel(n_z=args.n_z, res=args.res)
 loss_object = tf.keras.losses.BinaryCrossentropy()
 optimizer = tf.keras.optimizers.Adam()
 
