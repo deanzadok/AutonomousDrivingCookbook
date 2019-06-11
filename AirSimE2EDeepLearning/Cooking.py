@@ -79,7 +79,7 @@ def splitTrainValidationAndTestData(all_data_mappings, split_ratio=(0.7, 0.2, 0.
 
     return [train_data_mappings, test_data_mappings]
     
-def generateDataMapAirSim(folders, buffer_size):
+def generateDataMapAirSim(folders, buffer_size, images_gap, label_type):
     """ Data map generator for simulator(AirSim) data. Reads the driving_log csv file and returns a list of 'center camera image name - label(s)' tuples
            Inputs:
                folders: list of folders to collect data from
@@ -99,24 +99,27 @@ def generateDataMapAirSim(folders, buffer_size):
         else:
             current_df = pd.read_csv(os.path.join(folder, 'airsim_rec.txt'), sep='\t')
         
-        for i in range(buffer_size - 1, current_df.shape[0], 1):
+        for i in range(((buffer_size - 1)*images_gap), current_df.shape[0], 1):
 
-            current_label = float(current_df.iloc[i][['Steering']])
-
-            # convert the value into a class index
-            current_label = [int((current_label + 1.0) * 2.0)]
-
+            # store sequence of images names
             images_filepaths = []
-            for j in range(buffer_size):
-                images_filepaths.append(os.path.join(os.path.join(folder, 'images'), current_df.iloc[i - buffer_size + 1 + j]['ImageFile']))
+            start_idx = i - ((buffer_size - 1)*images_gap)
+            for j in range(start_idx, i+images_gap, images_gap):
+                images_filepaths.append(os.path.join(os.path.join(folder, 'images'), current_df.iloc[j]['ImageFile']))
 
-            image_filepath = os.path.join(os.path.join(folder, 'images'), current_df.iloc[i]['ImageFile'])
+            image_filepaths_key = os.path.join(os.path.join(folder, 'images'), current_df.iloc[i]['ImageFile'])
             
+            if label_type == 'action':
+                current_label = float(current_df.iloc[i][['Steering']])
+                current_label = [int((current_label + 1.0) * 2.0)] # value => class index
+            else: # label_type = depth
+                current_label = [images_filepaths[-1].replace("\\im_","\\depth_")]
+
             # Sanity check
-            if (image_filepath in all_mappings):
-                print('Error: attempting to add image {0} twice.'.format(image_filepath))
+            if (image_filepaths_key in all_mappings):
+                print('Error: attempting to add image {0} twice.'.format(image_filepaths_key))
             
-            all_mappings[image_filepath] = (images_filepaths, current_label)
+            all_mappings[image_filepaths_key] = (images_filepaths, current_label)
     
     mappings = [all_mappings[key] for key in all_mappings]
     
@@ -124,7 +127,7 @@ def generateDataMapAirSim(folders, buffer_size):
     
     return mappings
 
-def generatorForH5py(data_mappings, chunk_size=32):
+def generatorForH5py(data_mappings, label_type, chunk_size=32):
     """
     This function batches the data for saving to the H5 file
     """
@@ -134,23 +137,29 @@ def generatorForH5py(data_mappings, chunk_size=32):
         data_chunk = data_mappings[chunk_id:chunk_id + chunk_size]
         if (len(data_chunk) == chunk_size):
             images_names_chunk = [a for (a, b) in data_chunk]
-            labels_chunk = np.asarray([b[0] for (a, b) in data_chunk])
             
             #Flatten and yield as tuple
-            yield (images_names_chunk, labels_chunk.astype(float))
+            if label_type == 'action':
+                labels_chunk = np.asarray([b[0] for (a, b) in data_chunk])
+                yield (images_names_chunk, labels_chunk.astype(float))
+            else: # label_type = 'depth'
+                labels_chunk = np.asarray([b for (a, b) in data_chunk])
+                yield (images_names_chunk, labels_chunk)
             #if chunk_id + chunk_size > len(data_mappings):
             #    raise StopIteration
     #raise StopIteration
     
-def saveH5pyData(data_mappings, target_file_path, img_type, dest_res):
+def saveH5pyData(data_mappings, target_file_path, img_type, dest_res, label_type):
     """
     Saves H5 data to file
     """
     chunk_size = 32
-    gen = generatorForH5py(data_mappings,chunk_size)
+    gen = generatorForH5py(data_mappings, label_type, chunk_size)
 
     images_names_chunk, labels_chunk = next(gen)
     images_chunk = np.asarray(readImagesFromPath(images_names_chunk, img_type, dest_res))
+    if label_type == 'depth':
+        labels_chunk = np.asarray(readImagesFromPath(labels_chunk, img_type, dest_res))
     row_count = images_chunk.shape[0]
 
     checkAndCreateDir(target_file_path)
@@ -171,7 +180,9 @@ def saveH5pyData(data_mappings, target_file_path, img_type, dest_res):
 
         for images_names_chunk, label_chunk in gen:
             images_chunk = np.asarray(readImagesFromPath(images_names_chunk, img_type, dest_res))
-            
+            if label_type == 'depth':
+                label_chunk = np.asarray(readImagesFromPath(label_chunk, img_type, dest_res))
+
             # Resize the dataset to accommodate the next chunk of rows
             dset_images.resize(row_count + images_chunk.shape[0], axis=0)
             dset_labels.resize(row_count + label_chunk.shape[0], axis=0)
@@ -183,7 +194,7 @@ def saveH5pyData(data_mappings, target_file_path, img_type, dest_res):
             row_count += images_chunk.shape[0]
             
             
-def cook(folders, output_directory, buffer_size, img_type, dest_res, train_eval_test_split):
+def cook(folders, output_directory, buffer_size, images_gap, img_type, dest_res, label_type, train_eval_test_split):
     """ Primary function for data pre-processing. Reads and saves all data as h5 files.
             Inputs:
                 folders: a list of all data folders
@@ -195,10 +206,10 @@ def cook(folders, output_directory, buffer_size, img_type, dest_res, train_eval_
        print("Preprocessed data already exists at: {0}. Skipping preprocessing.".format(output_directory))
 
     else:
-        all_data_mappings = generateDataMapAirSim(folders, buffer_size)
+        all_data_mappings = generateDataMapAirSim(folders, buffer_size, images_gap, label_type)
         split_mappings = splitTrainValidationAndTestData(all_data_mappings, split_ratio=train_eval_test_split)
         
         for i in range(0, len(split_mappings), 1):
             print('Processing {0}...'.format(output_files[i]))
-            saveH5pyData(split_mappings[i], output_files[i], img_type, dest_res)
+            saveH5pyData(split_mappings[i], output_files[i], img_type, dest_res, label_type)
             print('Finished saving {0}.'.format(output_files[i]))

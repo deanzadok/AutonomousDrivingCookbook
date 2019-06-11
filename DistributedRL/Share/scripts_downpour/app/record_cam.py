@@ -110,14 +110,14 @@ while True:
 
     # save the combined image
     im = Image.fromarray(np.uint8(image_np))
-    im.save(os.path.join(images_dir, "ptc_{}.png".format(time_stamp)))
+    im.save(os.path.join(images_dir, "im_{}.png".format(time_stamp)))
 	
     # get position and car state
     client_pose = client.simGetVehiclePose()
     car_state = client.getCarState()
 
     # write meta-date to text file
-    airsim_rec.write("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(time_stamp,client_pose.position.x_val,client_pose.position.y_val,client_pose.position.z_val,car_state.rpm,car_state.speed,car_controls.steering,"ptc_{}.png".format(time_stamp))) 
+    airsim_rec.write("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(time_stamp,client_pose.position.x_val,client_pose.position.y_val,client_pose.position.z_val,car_state.rpm,car_state.speed,car_controls.steering,"im_{}.png".format(time_stamp))) 
 	
     # present state image
     cv2.imshow('navigation map', image_np)
