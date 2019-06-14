@@ -5,10 +5,10 @@ import h5py
 import argparse
 import tensorflow as tf
 from vae_model import VAEModel
-from utils import *
+from utils import dataset
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--data_dir', '-data_dir', help='path to raw data folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Data\\cooked_data\\imitation_4images_64', type=str)
+parser.add_argument('--data_dir', '-data_dir', help='path to raw data folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Data\\cooked_data\\imitation_4images', type=str)
 parser.add_argument('--output_dir', '-output_dir', help='path to output folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\models\\test', type=str)
 parser.add_argument('--batch_size', '-batch_size', help='number of samples in one minibatch', default=32, type=int)
 parser.add_argument('--epochs', '-epochs', help='number of epochs to train the model', default=40, type=int)
@@ -54,7 +54,8 @@ def test(images, labels):
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
 # get train and test datasets
-train_ds, test_ds = create_dataset(args.data_dir, args.batch_size, label_type='image')
+#train_ds, test_ds = create_dataset_from_folder(args.data_dir, args.batch_size, args.res)
+train_ds, test_ds = dataset.create_dataset(args.data_dir, args.batch_size, label_type='image')
 
 # create model, loss and optimizer
 model = VAEModel(n_z=args.n_z, res=args.res)

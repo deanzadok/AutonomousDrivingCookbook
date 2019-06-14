@@ -5,16 +5,18 @@ import argparse
 import tensorflow as tf
 from PIL import Image
 from vae_model import VAEModel
-from utils import *
+from utils import dataset
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--model_path', '-model_path', help='model file path', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\models\\imitation_4images_vae\\vaemodel35.ckpt', type=str)
-parser.add_argument('--data_dir', '-data_dir', help='path to raw data folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Data\\cooked_data\\imitation_to_depth_4images', type=str)
-parser.add_argument('--output_dir', '-output_dir', help='path to output folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\models\\test', type=str)
+parser.add_argument('--model_path', '-model_path', help='model file path', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\models\\imitation_4images_vae_28\\vaemodel35.ckpt', type=str)
+parser.add_argument('--data_dir', '-data_dir', help='path to raw data folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Data\\cooked_data\\imitation_to_segmentation_4images_28', type=str)
+parser.add_argument('--output_dir', '-output_dir', help='path to output folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\models\\segmentation_layers_loss\\imitation_to_segmentation_4images_vae_28_1layers', type=str)
 parser.add_argument('--batch_size', '-batch_size', help='number of samples in one minibatch', default=32, type=int)
-parser.add_argument('--epochs', '-epochs', help='number of epochs to train the model', default=3, type=int)
+parser.add_argument('--epochs', '-epochs', help='number of epochs to train the model', default=40, type=int)
 parser.add_argument('--n_z', '-n_z', help='size of the each one of the parameters [mean,stddev] in the latent space', default=8, type=int)
-parser.add_argument('--res', '-res', help='destination resolution for images in the cooked data. if 0, do nothing', default=0, type=int)
+parser.add_argument('--trainable_layers', '-trainable_layers', help='number of trainable decoding layers', default=1, type=int)
+parser.add_argument('--res', '-res', help='destination resolution for images in the cooked data. if 0, do nothing', default=28, type=int)
+parser.add_argument('--train_size', '-train_size', help='number of images in the training dataset', default=5000, type=int)
 args = parser.parse_args()
 
 # tf function to train
@@ -44,12 +46,16 @@ if not os.path.isdir(args.output_dir):
     os.makedirs(args.output_dir)
 
 # get train and test datasets
-train_ds, test_ds = create_dataset(args.data_dir, args.batch_size)
+train_ds, test_ds = dataset.create_dataset(args.data_dir, args.batch_size, args.train_size, label_type='depth')
 
 train_loss_list = []
 test_loss_list = []
 
-trainable_layers = 7*[False]
+# prepare boolean vars for decoding layers
+trainable_layers = [True]*5
+frozen_layers = 5 - args.trainable_layers
+for i in range(frozen_layers):
+    trainable_layers[i] = False
 
 # create model, loss and optimizer
 model = VAEModel(n_z=args.n_z, res=args.res, trainable_encoder=False, trainable_decoder=trainable_layers)
