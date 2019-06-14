@@ -5,7 +5,7 @@ import argparse
 import tensorflow as tf
 from PIL import Image
 from vae_model import VAEModel
-from utils import dataset
+from utils import import_data
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--model_path', '-model_path', help='model file path', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\models\\imitation_4images_vae_28\\vaemodel35.ckpt', type=str)
@@ -46,7 +46,7 @@ if not os.path.isdir(args.output_dir):
     os.makedirs(args.output_dir)
 
 # get train and test datasets
-train_ds, test_ds = dataset.create_dataset(args.data_dir, args.batch_size, args.train_size, label_type='depth')
+train_ds, test_ds = import_data.create_dataset(args.data_dir, args.batch_size, args.train_size, label_type='depth')
 
 train_loss_list = []
 test_loss_list = []

@@ -5,7 +5,7 @@ import h5py
 import argparse
 import tensorflow as tf
 from vae_model import VAEModel
-from utils import dataset
+from utils import import_data
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_dir', '-data_dir', help='path to raw data folder', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\Data\\cooked_data\\imitation_4images', type=str)
@@ -55,7 +55,7 @@ os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
 # get train and test datasets
 #train_ds, test_ds = create_dataset_from_folder(args.data_dir, args.batch_size, args.res)
-train_ds, test_ds = dataset.create_dataset(args.data_dir, args.batch_size, label_type='image')
+train_ds, test_ds = import_data.create_dataset(args.data_dir, args.batch_size, label_type='image')
 
 # create model, loss and optimizer
 model = VAEModel(n_z=args.n_z, res=args.res)
