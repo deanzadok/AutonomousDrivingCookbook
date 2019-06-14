@@ -16,10 +16,9 @@ import keyboard
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--path', '-path', help='model file path', default='C:\\Users\\t-dezado\\OneDrive - Microsoft\\Desktop\\model15.ckpt', type=str)
-parser.add_argument('--camera', '-camera', help='type of the camera. choose from [rgb, depth, grayscale]', default='grayscale', type=str)
 parser.add_argument('--debug', '-debug', dest='debug', help='debug mode, present fron camera on screen', action='store_true')
-parser.add_argument('--store', '-store', dest='store', help='store images to experiment folder', action='store_true')
-parser.add_argument('--store_depth', '-store_depth', dest='store_depth', help='store depth image alongside regular image', action='store_true')
+parser.add_argument('--camera', '-camera', help='type of the camera. choose from [depth, grayscale]', default='grayscale', type=str)
+parser.add_argument('--store', '-store', help='store images to experiment folder. choose from [regular, depth, segmentation]', default='segmentation', type=str)
 args = parser.parse_args()
 
 # tf function to test
@@ -32,7 +31,7 @@ if __name__ == "__main__":
     # allow growth is possible using an env var in tf2.0
     os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
-    if args.store:
+    if args.store != "":
         # create experiments directories
         experiment_dir = os.path.join('C:\\Users\\t-dezado\\OneDrive - Microsoft\\Documents\\AirSim', datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
         images_dir = os.path.join(experiment_dir, 'images')
@@ -70,13 +69,19 @@ if __name__ == "__main__":
 
     print('Running model')
 
+    Image_requests = [airsim.ImageRequest("RCCamera", airsim.ImageType.DepthPerspective, True, False),
+                      airsim.ImageRequest("RCCamera", airsim.ImageType.Scene, False, False)]
+    if args.store == 'segmentation':
+        Image_requests.append(airsim.ImageRequest("RCCamera", airsim.ImageType.Segmentation, False, False))
+
     while(True):
 
         time_stamp = int(time.time()*10000000)
 
-        responses = client.simGetImages([airsim.ImageRequest("RCCamera", airsim.ImageType.DepthPerspective, True, False),
-                                         airsim.ImageRequest("RCCamera", airsim.ImageType.Scene, False, False)])
-        if args.camera == 'depth' or args.store_depth:
+        responses = client.simGetImages(Image_requests)
+            
+
+        if args.camera == 'depth' or args.store == 'depth':
             # get depth image from airsim
             img1d = np.array(responses[0].image_data_float, dtype=np.float)
             img1d = 255/np.maximum(np.ones(img1d.size), img1d)
@@ -86,39 +91,43 @@ if __name__ == "__main__":
                 depth_np = np.array(image.resize((84, 84)).convert('L')) 
             else:
                 depth_np = np.zeros((84,84)).astype(float)
-        if args.camera == 'rgb' or args.camera == 'grayscale' or args.store:
+        if args.camera == 'grayscale' or args.store == 'regular':
             # get image from AirSim
             img1d = np.fromstring(responses[1].image_data_uint8, dtype=np.uint8)
             if img1d.size > 1:
                 img2d = np.reshape(img1d, (responses[1].height, responses[1].width, 3))
-                image = Image.fromarray(img2d)
-                if args.camera == 'grayscale':
-                    image = image.convert('L')
+                image = Image.fromarray(img2d).convert('L')
                 image_np = np.array(image.resize((84, 84)))
-                
             else:
-                if args.camera == 'grayscale':
-                    image_np = np.zeros((84,84)).astype(float)
-                else:
-                    image_np = np.zeros((84,84,3)).astype(float)
+                image_np = np.zeros((84,84)).astype(float)
+        if args.store == 'segmentation':
+            # get segmentation image from AirSim
+            img1d = np.fromstring(responses[2].image_data_uint8, dtype=np.uint8)
+            if img1d.size > 1:
+                img2d = np.reshape(img1d, (responses[2].height, responses[2].width, 3))
+                image = Image.fromarray(img2d).convert('L')
+                seg_np = np.array(image.resize((84, 84)))
+            else:
+                seg_np = np.zeros((84,84)).astype(float)
 
         # get coverage image
-        cov_image, reward = covMap.get_state_from_pose()
-        #print("reward: {}".format(reward))
+        cov_image, _ = covMap.get_state_from_pose()
 
-        # store it if requested
-        if args.store:
-
-            # save the combined image
+        # store images if requested
+        if args.store != "":
+            # save grayscaled image
             im = Image.fromarray(np.uint8(image_np))
             im.save(os.path.join(images_dir, "im_{}.png".format(time_stamp)))
 
-        # store it if requested
-        if args.store_depth:
+            # save depth image
+            if args.store == 'depth':
+                depth_im = Image.fromarray(np.uint8(depth_np))
+                depth_im.save(os.path.join(images_dir, "depth_{}.png".format(time_stamp)))
 
-            # save the combined image
-            depth_im = Image.fromarray(np.uint8(depth_np))
-            depth_im.save(os.path.join(images_dir, "depth_{}.png".format(time_stamp)))
+            # save segmentation image
+            if args.store == 'segmentation':
+                seg_im = Image.fromarray(np.uint8(seg_np))
+                seg_im.save(os.path.join(images_dir, "seg_{}.png".format(time_stamp)))
 
         # combine both inputs
         if args.camera == 'depth':
@@ -126,10 +135,6 @@ if __name__ == "__main__":
             image_np = depth_np
         elif args.camera == 'grayscale':
             image_np[:cov_image.shape[0],:cov_image.shape[1]] = cov_image
-        else:
-            cov_rgb_image = np.expand_dims(cov_image, axis=2)
-            cov_rgb_image = np.repeat(cov_rgb_image, 3, axis=2)
-            image_np[:cov_rgb_image.shape[0],:cov_rgb_image.shape[1],:] = cov_rgb_image
 
         # present state image if debug mode is on
         if args.debug:
@@ -152,17 +157,17 @@ if __name__ == "__main__":
         client.setCarControls(car_controls)
 
         # store it if requested
-        if args.store:
+        if args.store != "":
             # get position and car state
             client_pose = client.simGetVehiclePose()
             car_state = client.getCarState()
 
-            # write meta-date to text file
+            # write meta-date to text fileq
             airsim_rec.write("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(time_stamp,client_pose.position.x_val,client_pose.position.y_val,client_pose.position.z_val,car_state.rpm,car_state.speed,car_controls.steering,"im_{}.png".format(time_stamp)))
 
         print('steering = {0}, qvalues = {1}'.format(car_controls.steering, predictions))
 
         if keyboard.is_pressed('q'):  # if key 'q' is pressed
-            if args.store:
+            if args.store != "":
                 airsim_rec.close()
             sys.exit()

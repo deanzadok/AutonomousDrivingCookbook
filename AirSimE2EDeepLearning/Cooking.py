@@ -112,8 +112,10 @@ def generateDataMapAirSim(folders, buffer_size, images_gap, label_type):
             if label_type == 'action':
                 current_label = float(current_df.iloc[i][['Steering']])
                 current_label = [int((current_label + 1.0) * 2.0)] # value => class index
-            else: # label_type = depth
+            elif label_type == 'depth': 
                 current_label = [images_filepaths[-1].replace("\\im_","\\depth_")]
+            else: # label_type = segmentation
+                current_label = [images_filepaths[-1].replace("\\im_","\\seg_")]
 
             # Sanity check
             if (image_filepaths_key in all_mappings):
@@ -142,7 +144,7 @@ def generatorForH5py(data_mappings, label_type, chunk_size=32):
             if label_type == 'action':
                 labels_chunk = np.asarray([b[0] for (a, b) in data_chunk])
                 yield (images_names_chunk, labels_chunk.astype(float))
-            else: # label_type = 'depth'
+            else: # label_type = 'depth' or 'segmentation
                 labels_chunk = np.asarray([b for (a, b) in data_chunk])
                 yield (images_names_chunk, labels_chunk)
             #if chunk_id + chunk_size > len(data_mappings):
@@ -158,7 +160,7 @@ def saveH5pyData(data_mappings, target_file_path, img_type, dest_res, label_type
 
     images_names_chunk, labels_chunk = next(gen)
     images_chunk = np.asarray(readImagesFromPath(images_names_chunk, img_type, dest_res))
-    if label_type == 'depth':
+    if label_type == 'depth' or label_type == 'segmentation':
         labels_chunk = np.asarray(readImagesFromPath(labels_chunk, img_type, dest_res))
     row_count = images_chunk.shape[0]
 
@@ -180,7 +182,7 @@ def saveH5pyData(data_mappings, target_file_path, img_type, dest_res, label_type
 
         for images_names_chunk, label_chunk in gen:
             images_chunk = np.asarray(readImagesFromPath(images_names_chunk, img_type, dest_res))
-            if label_type == 'depth':
+            if label_type == 'depth' or label_type == 'segmentation':
                 label_chunk = np.asarray(readImagesFromPath(label_chunk, img_type, dest_res))
 
             # Resize the dataset to accommodate the next chunk of rows
